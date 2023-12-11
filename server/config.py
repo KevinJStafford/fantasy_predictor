@@ -10,6 +10,7 @@ from sqlalchemy import MetaData
 from flask_bcrypt import Bcrypt
 
 # Local imports
+from secret_keys import *
 
 # Instantiate app, set attributes
 app = Flask(__name__)
@@ -32,4 +33,4 @@ bcrypt = Bcrypt(app)
 # Instantiate CORS
 CORS(app)
 
-app.secret_key = b';\xa9(\nO\x04\xbak@f\xa5\xc9N,\xa2\x97'
+app.secret_key = SECRET_KEY
