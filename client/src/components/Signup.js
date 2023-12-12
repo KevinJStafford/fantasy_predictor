@@ -10,14 +10,14 @@ function Signup({setUser}) {
 
     const signupSchema = yup.object().shape({
         username: yup.string()
-        .min(5, 'Too short!')
-        .max(18, 'Too long!')
-        .required('Required!'),
+        .min(5, 'Username is too short!')
+        .max(18, 'Username is too long!')
+        .required('Username is Required!'),
         email: yup.string().email('Invalid email'),
         password: yup.string()
-        .min(5, 'Too short!')
-        .max(18, 'Too long!')
-        .required('Required!')
+        .min(5, 'Password is too short!')
+        .max(18, 'Password is too long!')
+        .required('Password is Required!')
     })
 
     const formik = useFormik({
@@ -25,7 +25,6 @@ function Signup({setUser}) {
             username: '',
             email: '',
             password: '',
-            passwordConfirmation: ''
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
@@ -53,38 +52,51 @@ function Signup({setUser}) {
             <Navbar />
             <div>
             {/* {formik.errors} */}
-
-        <Container maxWidth="sm">
+        <hr></hr>
+        <Container maxWidth="xs">
             <form onSubmit={formik.handleSubmit}>
                 <Box>
-                <TextField 
+                <TextField
+                    sx={{ width: 1}}
                     id="username" 
                     label="Username" 
                     variant="standard"
+                    error={!!formik.errors.username}
+                    helperText={formik.errors.username}
+                    required
                     value={formik.values.username}
                     onChange={formik.handleChange}
                 />
                 </Box>
                 <Box>
                 <TextField 
+                    sx={{ width: 1}}
                     id="email" 
                     label="email" 
                     variant="standard"
+                    error={!!formik.errors.email}
+                    helperText={formik.values.email}
+                    required
                     value={formik.values.email}
                    onChange={formik.handleChange}
                   />
                 </Box>
                 <Box>
                 <TextField 
+                    sx={{ width: 1}}
                     id="password" 
                     label="password"
                     type="password"
                     variant="standard"
+                    error={formik.errors.password}
+                    helperText={formik.errors.password}
+                    required
                     value={formik.values.password}
                     onChange={formik.handleChange} 
                   />
                 </Box>
-                <Button variant="outlined" type="submit">Submit</Button>
+                <hr></hr>
+                <Button fullWidth='True' variant="outlined" type="submit">Submit</Button>
             </form>
         </Container>
             </div>
