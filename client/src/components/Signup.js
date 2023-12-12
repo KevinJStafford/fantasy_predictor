@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import {TextField, Button} from '@mui/material';
+import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
+
+import Navbar from './Navbar'
 
 function Signup({setUser}) {
     const [signup, setSignup] = useState(true)
@@ -22,11 +24,12 @@ function Signup({setUser}) {
         initialValues: {
             username: '',
             email: '',
-            password: ''
+            password: '',
+            passwordConfirmation: ''
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
-            const endpoint = signup ? '/users' : '/login'
+            const endpoint = '/join'
             fetch(endpoint, {
                 method: 'POST',
                 headers: {
@@ -45,41 +48,47 @@ function Signup({setUser}) {
         }
     })
 
-    function toggleSignup() {
-        setSignup((currentSignup) => !currentSignup)
-    }
-
     return(
-        <div>
+        <main>
+            <Navbar />
+            <div>
             {/* {formik.errors} */}
 
-        <form onSubmit={formik.handleSubmit}>
-            <TextField 
-                id="username" 
-                label="Username" 
-                variant="outlined"
-                value={formik.values.username}
-                onChange={formik.handleChange}
-            />
-            {signup && <TextField 
-                id="email" 
-                label="email" 
-                variant="outlined"
-                value={formik.values.email}
-                onChange={formik.handleChange}
-              />}
-            <TextField 
-                id="password" 
-                label="password"
-                type="password"
-                variant="outlined"
-                value={formik.values.password}
-                onChange={formik.handleChange} 
-              />
-            <Button variant="contained" type="submit">Submit</Button>
-            <Button variant='contained' onClick={toggleSignup}>{signup ? 'Login instead!' : 'Register for an account'}</Button>
-        </form>
-        </div>
+        <Container maxWidth="sm">
+            <form onSubmit={formik.handleSubmit}>
+                <Box>
+                <TextField 
+                    id="username" 
+                    label="Username" 
+                    variant="standard"
+                    value={formik.values.username}
+                    onChange={formik.handleChange}
+                />
+                </Box>
+                <Box>
+                <TextField 
+                    id="email" 
+                    label="email" 
+                    variant="standard"
+                    value={formik.values.email}
+                   onChange={formik.handleChange}
+                  />
+                </Box>
+                <Box>
+                <TextField 
+                    id="password" 
+                    label="password"
+                    type="password"
+                    variant="standard"
+                    value={formik.values.password}
+                    onChange={formik.handleChange} 
+                  />
+                </Box>
+                <Button variant="outlined" type="submit">Submit</Button>
+            </form>
+        </Container>
+            </div>
+        </main>
     )
 }
 
