@@ -1,19 +1,28 @@
-// import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Switch, Route } from "react-router-dom";
-import Signup from './Signup'
 
+import Signup from './Signup'
 import Navbar from './Navbar'
+import LandingGrid from "./LandingGrid"
+import Login from "./Login"
+
 
 function App() {
+  const [user, setUser] = useState(null)
+
+
   return (
     <main>
       <Switch>
         <Route exact path="/">
           <Navbar />
-          {/* <LandingGrid />; */}
+          <LandingGrid />
       </Route>
-      <Route exact path="/join">
-        <Signup />
+      <Route exact path="/users">
+        <Signup setUser={setUser} />
+      </Route>
+      <Route exact path="/login">
+        <Login />
       </Route>
       <Route exact path="/user">
         {/* <Members /> */}

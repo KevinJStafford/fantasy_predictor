@@ -28,8 +28,7 @@ function Signup({setUser}) {
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
-            const endpoint = '/join'
-            fetch(endpoint, {
+            fetch('/users', {
                 method: 'POST',
                 headers: {
                     "Content-type": 'application/json'
@@ -96,7 +95,7 @@ function Signup({setUser}) {
                   />
                 </Box>
                 <hr></hr>
-                <Button fullWidth='True' variant="outlined" type="submit">Submit</Button>
+                <Button fullWidth='True'variant="outlined" type="submit">Submit</Button>
             </form>
         </Container>
             </div>

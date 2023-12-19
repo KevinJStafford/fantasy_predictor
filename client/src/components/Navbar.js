@@ -9,7 +9,7 @@ function Navbar() {
     return (
         <Flex>
             <Box p='4' bg='red.400'>
-                <Image justify="left" class="nav_logo" objectFit='cover' src="https://dl.dropboxusercontent.com/scl/fi/jz578vjpoujkt4o7n0o65/header_navbar_2.png?rlkey=e85yc3b29u3x8nbk8yxkmiw2t&dl=0" alt='Fantasy Predictor text logo' />
+                <Image justify="left" className="nav_logo" objectFit='cover' src="https://dl.dropboxusercontent.com/scl/fi/jz578vjpoujkt4o7n0o65/header_navbar_2.png?rlkey=e85yc3b29u3x8nbk8yxkmiw2t&dl=0" alt='Fantasy Predictor text logo' />
             </Box>
             <Spacer />
             <Box p='4' bg='green.400'>
