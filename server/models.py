@@ -27,14 +27,12 @@ class User(db.Model, SerializerMixin):
     username = db.Column(db.String, nullable=False)
     email = db.Column(db.String, nullable=False)
     _password_hash = db.Column(db.String)
-    game_id = db.Column(db.Integer, db.ForeignKey('games.id'))
-    games = db.relationship('Game', back_populates='game')
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     # Relationships
-    predictions = db.relationship('Prediction', back_populates='user', cascade='all, delete-orphan')
-    games = association_proxy('predictions', 'game')
+    # predictions = db.relationship('Prediction', back_populates='user', cascade='all, delete-orphan')
+    # games = association_proxy('predictions', 'game')
 
     @property
     def password_hash(self):
@@ -79,8 +77,18 @@ class Game(db.Model, SerializerMixin):
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     # Relationships
-    predictions = db.relationship('Prediction', back_populates='game', cascade='all, delete-orphan')
-    users = association_proxy('predictions', 'user')
+    # predictions = db.relationship('Prediction', back_populates='game', cascade='all, delete-orphan')
+    # users = association_proxy('predictions', 'user')
+
+class Fixture(db.Model, SerializerMixin):
+    __tablename__ = 'fixtures'
+
+    id = db.Column(db.Integer, primary_key=True)
+    fixture_round = db.Column(db.Integer)
+    fixture_date = db.Column(db.DateTime)
+    fixture_home_team = db.Column(db.String)
+    fixture_away_team = db.Column(db.String)
+
 
     def __repr__(self):
         return f'<Game {self.id}: {self.game_week_name}>'

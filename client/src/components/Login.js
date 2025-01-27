@@ -72,8 +72,7 @@ function Login() {
                     helperText={formik.errors.password}
                     required
                     value={formik.values.password}
-                    onChange={formik.handleChange} 
-                  />
+                    onChange={formik.handleChange}/>
                 </Box>
                 <hr></hr>
                 <Button fullWidth='True' variant="outlined" type="submit">Submit</Button>

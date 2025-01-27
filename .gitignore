@@ -64,3 +64,6 @@ __pycache__
 instance
 .vscode
 package-lock.json
+
+# secret key
+secret_keys.py

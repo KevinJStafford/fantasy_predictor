@@ -5,6 +5,7 @@ import Signup from './Signup'
 import Navbar from './Navbar'
 import LandingGrid from "./LandingGrid"
 import Login from "./Login"
+import Members from "./Members"
 
 
 function App() {
@@ -24,8 +25,8 @@ function App() {
       <Route exact path="/login">
         <Login />
       </Route>
-      <Route exact path="/user">
-        {/* <Members /> */}
+      <Route exact path="/player">
+        {<Members />}
       </Route>
       <Route exact path="/results">
         {/* <Results /> */}

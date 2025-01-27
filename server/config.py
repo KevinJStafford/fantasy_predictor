@@ -10,14 +10,16 @@ from sqlalchemy import MetaData
 from flask_bcrypt import Bcrypt
 
 # Local imports
-from secret_keys import *
 
 # Instantiate app, set attributes
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.json.compact = False
+app.secret_key = b'og\xd6\xf5\xec\xd5\xd4\xc0U\xb2\xb7W\n\xa9#\xf0'
 
+
+1
 # Define metadata, instantiate db
 metadata = MetaData(naming_convention={
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
@@ -33,4 +35,3 @@ bcrypt = Bcrypt(app)
 # Instantiate CORS
 CORS(app)
 
-app.secret_key = SECRET_KEY
