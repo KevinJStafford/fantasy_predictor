@@ -1,21 +1,7 @@
 from sqlalchemy_serializer import SerializerMixin
 from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy import MetaData
-from flask_sqlalchemy import SQLAlchemy
 
 from config import db, bcrypt
-
-convention = {
-    "ix": "ix_%(column_0_label)s",
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-    "ck": "ck_%(table_name)s_%(constraint_name)s",
-    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s"
-}
-
-metadata = MetaData(naming_convention=convention)
-
-db = SQLAlchemy(metadata=metadata)
 
 # Models go here!
 class User(db.Model, SerializerMixin):
@@ -36,7 +22,7 @@ class User(db.Model, SerializerMixin):
 
     @property
     def password_hash(self):
-        return self.password_hash
+        return self._password_hash
     
     @password_hash.setter
     def password_hash(self, plain_text_password):
@@ -47,7 +33,7 @@ class User(db.Model, SerializerMixin):
         
     def authenticate(self, password_string):
         byte_object = password_string.encode('utf-8')
-        return bcrypt.check_password_hash(self.password_hash, byte_object)
+        return bcrypt.check_password_hash(self._password_hash, byte_object)
     
     def __repr__(self):
         return f'<User {self.id}: {self.username}>'

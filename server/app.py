@@ -3,41 +3,27 @@
 # Standard library imports
 
 # Remote library imports
-from models import Game, Fixture
-from flask import Flask, request, make_response, session
-from flask_restful import Api, Resource
-from flask_migrate import Migrate
-import os
+from flask import request, make_response, session
+from flask_restful import Resource
 
 # Local imports
 from config import app, db, api
 # Add your model imports
-from models import db, User, Game, Prediction
-
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DATABASE = os.environ.get(
-    "DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'app.db')}")
-
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.json.compact = False
-
-migrate = Migrate(app, db)
-
-db.init_app(app)
-
-api = Api(app)
+from models import User, Game, Prediction, Fixture
 
 # Views go here!
 class Users(Resource):
     def post(self):
-        data = request.get_json()
-        user = User(username=data['username'], email=data['email'], password_hash=data['password'])
-        db.session.add(user)
-        db.session.commit()
-        session['user_id'] = user.id
-        return make_response({'user': user.to_dict()}, 201)
+        try:
+            data = request.get_json()
+            user = User(username=data['username'], email=data['email'], password_hash=data['password'])
+            db.session.add(user)
+            db.session.commit()
+            session['user_id'] = user.id
+            return make_response({'user': user.to_dict()}, 201)
+        except Exception as e:
+            db.session.rollback()
+            return make_response({'error': str(e)}, 500)
     
 api.add_resource(Users, '/api/v1/users')
 
