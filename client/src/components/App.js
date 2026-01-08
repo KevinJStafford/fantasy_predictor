@@ -23,10 +23,10 @@ function App() {
         <Signup setUser={setUser} />
       </Route>
       <Route exact path="/login">
-        <Login />
+        <Login setUser={setUser} />
       </Route>
       <Route exact path="/player">
-        {<Members />}
+        <Members />
       </Route>
       <Route exact path="/results">
         {/* <Results /> */}

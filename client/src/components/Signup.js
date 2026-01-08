@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
@@ -6,7 +5,6 @@ import * as yup from 'yup';
 import Navbar from './Navbar'
 
 function Signup({setUser}) {
-    const [signup, setSignup] = useState(true)
 
     const signupSchema = yup.object().shape({
         username: yup.string()
@@ -28,7 +26,7 @@ function Signup({setUser}) {
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
-            fetch('/users', {
+            fetch('/api/v1/users', {
                 method: 'POST',
                 headers: {
                     "Content-type": 'application/json'
@@ -74,8 +72,7 @@ function Signup({setUser}) {
                     label="email" 
                     variant="standard"
                     error={!!formik.errors.email}
-                    helperText={formik.values.email}
-                    required
+                    helperText={formik.errors.email}
                     value={formik.values.email}
                    onChange={formik.handleChange}
                   />
@@ -87,7 +84,7 @@ function Signup({setUser}) {
                     label="password"
                     type="password"
                     variant="standard"
-                    error={formik.errors.password}
+                    error={!!formik.errors.password}
                     helperText={formik.errors.password}
                     required
                     value={formik.values.password}

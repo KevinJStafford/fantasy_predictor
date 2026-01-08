@@ -1,13 +1,10 @@
-import { useState } from 'react';
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
 
 import Navbar from './Navbar'
 
-function Login() {
-    const [user, setUser] = useState(true)
-
+function Login({setUser}) {
     const loginSchema = yup.object().shape({
         username: yup.string()
         .required('Username is Required!'),
@@ -22,7 +19,7 @@ function Login() {
         },
         validationSchema: loginSchema,
         onSubmit: (values) => {
-            fetch('/login', {
+            fetch('/api/v1/login', {
                 method: 'POST',
                 headers: {
                     "Content-type": 'application/json'
@@ -68,7 +65,7 @@ function Login() {
                     label="password"
                     type="password"
                     variant="standard"
-                    error={formik.errors.password}
+                    error={!!formik.errors.password}
                     helperText={formik.errors.password}
                     required
                     value={formik.values.password}
