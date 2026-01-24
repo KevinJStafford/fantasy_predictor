@@ -1,13 +1,45 @@
 import * as React from 'react'
 import { Card, CardContent, Typography, TextField, Button, Box, Grid, Alert } from "@mui/material"
 import {useFormik} from 'formik';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as yup from 'yup';
 
-function Predictions({fixture}) {
+// Helper function to parse UTC dates
+const parseUtcDate = (value) => {
+    if (!value) return null
+
+    // If server returns ISO with timezone (best case)
+    if (typeof value === 'string' && (value.includes('Z') || /[+-]\d\d:\d\d$/.test(value))) {
+        const d = new Date(value)
+        return Number.isNaN(d.getTime()) ? null : d
+    }
+
+    // If server returns "YYYY-MM-DD HH:MM:SS" (no timezone), treat it as UTC
+    if (typeof value === 'string' && value.includes(' ') && !value.includes('T')) {
+        const utcIso = value.replace(' ', 'T') + 'Z'
+        const d = new Date(utcIso)
+        return Number.isNaN(d.getTime()) ? null : d
+    }
+
+    // Fallback: let the browser try
+    const d = new Date(value)
+    return Number.isNaN(d.getTime()) ? null : d
+}
+
+function Predictions({fixture, existingPrediction, onPredictionSaved}) {
     const {fixture_round, fixture_date, fixture_home_team, fixture_away_team, id} = fixture
     const [message, setMessage] = useState(null)
     const [saving, setSaving] = useState(false)
+    
+    // Check if the game has started (lock predictions after kickoff time)
+    const isGameStarted = () => {
+        if (!fixture_date) return false
+        const gameDate = parseUtcDate(fixture_date)
+        if (!gameDate) return false
+        return new Date() >= gameDate
+    }
+    
+    const gameStarted = isGameStarted()
 
     const predictionSchema = yup.object().shape({
         home_team_score: yup.number()
@@ -22,9 +54,10 @@ function Predictions({fixture}) {
 
     const formik = useFormik({
         initialValues: {
-            home_team_score: '',
-            away_team_score: '',
+            home_team_score: existingPrediction?.home_team_score ?? '',
+            away_team_score: existingPrediction?.away_team_score ?? '',
         },
+        enableReinitialize: true,
         validationSchema: predictionSchema,
         onSubmit: (values) => {
             setSaving(true)
@@ -52,6 +85,10 @@ function Predictions({fixture}) {
             .then(data => {
                 setMessage({ type: 'success', text: 'Prediction saved successfully!' })
                 setTimeout(() => setMessage(null), 3000)
+                // Refresh results if callback provided
+                if (onPredictionSaved) {
+                    onPredictionSaved()
+                }
             })
             .catch(error => {
                 console.error('Error saving prediction:', error)
@@ -63,26 +100,17 @@ function Predictions({fixture}) {
         }
     })
 
-    const parseUtcDate = (value) => {
-        if (!value) return null
-
-        // If server returns ISO with timezone (best case)
-        if (typeof value === 'string' && (value.includes('Z') || /[+-]\d\d:\d\d$/.test(value))) {
-            const d = new Date(value)
-            return Number.isNaN(d.getTime()) ? null : d
+    // Update form values when existingPrediction changes
+    useEffect(() => {
+        if (existingPrediction) {
+            formik.setFieldValue('home_team_score', existingPrediction.home_team_score ?? '')
+            formik.setFieldValue('away_team_score', existingPrediction.away_team_score ?? '')
+        } else {
+            // Clear form if no existing prediction
+            formik.setFieldValue('home_team_score', '')
+            formik.setFieldValue('away_team_score', '')
         }
-
-        // If server returns "YYYY-MM-DD HH:MM:SS" (no timezone), treat it as UTC
-        if (typeof value === 'string' && value.includes(' ') && !value.includes('T')) {
-            const utcIso = value.replace(' ', 'T') + 'Z'
-            const d = new Date(utcIso)
-            return Number.isNaN(d.getTime()) ? null : d
-        }
-
-        // Fallback: let the browser try
-        const d = new Date(value)
-        return Number.isNaN(d.getTime()) ? null : d
-    }
+    }, [existingPrediction?.id, existingPrediction?.home_team_score, existingPrediction?.away_team_score])
 
     const formatKickoffLocal = (value) => {
         const date = parseUtcDate(value)
@@ -112,6 +140,12 @@ function Predictions({fixture}) {
                         {message.text}
                     </Alert>
                 )}
+                
+                {gameStarted && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                        This game has started. Predictions are locked and cannot be changed.
+                    </Alert>
+                )}
 
                 <form onSubmit={formik.handleSubmit}>
                     <Grid container spacing={2} alignItems="center">
@@ -131,6 +165,7 @@ function Predictions({fixture}) {
                                 error={formik.touched.home_team_score && Boolean(formik.errors.home_team_score)}
                                 helperText={formik.touched.home_team_score && formik.errors.home_team_score}
                                 inputProps={{ min: 0, max: 20 }}
+                                disabled={gameStarted}
                             />
                         </Grid>
                         
@@ -156,6 +191,7 @@ function Predictions({fixture}) {
                                 error={formik.touched.away_team_score && Boolean(formik.errors.away_team_score)}
                                 helperText={formik.touched.away_team_score && formik.errors.away_team_score}
                                 inputProps={{ min: 0, max: 20 }}
+                                disabled={gameStarted}
                             />
                         </Grid>
                         
@@ -164,10 +200,10 @@ function Predictions({fixture}) {
                                 fullWidth
                                 type="submit"
                                 variant="contained"
-                                disabled={saving}
+                                disabled={saving || gameStarted}
                                 sx={{ mt: { xs: 0, md: 4 } }}
                             >
-                                {saving ? 'Saving...' : 'Save Prediction'}
+                                {saving ? 'Saving...' : gameStarted ? 'Game Started' : 'Save Prediction'}
                             </Button>
                         </Grid>
                     </Grid>

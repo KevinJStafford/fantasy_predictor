@@ -547,21 +547,37 @@ class PredictionsResource(Resource):
             if not user_id:
                 return make_response({'error': 'User not authenticated'}, 401)
             
-            # Get all user's predictions
-            user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.desc()).all()
+            # Get all user's predictions, sorted by date (oldest first)
+            user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.asc()).all()
             
             predictions = []
+            fixtures_found = 0
+            fixtures_completed = 0
+            
             for game in user_games:
-                # Find matching fixture to get actual scores
+                # Find matching fixture to get actual scores - try exact match first
                 fixture = Fixture.query.filter_by(
                     fixture_home_team=game.home_team,
                     fixture_away_team=game.away_team
                 ).first()
                 
+                # If not found, try case-insensitive match
+                if not fixture:
+                    all_fixtures = Fixture.query.all()
+                    for f in all_fixtures:
+                        if (f.fixture_home_team and f.fixture_away_team and 
+                            f.fixture_home_team.lower().strip() == game.home_team.lower().strip() and
+                            f.fixture_away_team.lower().strip() == game.away_team.lower().strip()):
+                            fixture = f
+                            break
+                
                 prediction_data = game.to_dict()
                 
                 # Add fixture and actual score info
                 if fixture:
+                    fixtures_found += 1
+                    if fixture.is_completed:
+                        fixtures_completed += 1
                     prediction_data['fixture'] = {
                         'id': fixture.id,
                         'round': fixture.fixture_round,
@@ -572,10 +588,22 @@ class PredictionsResource(Resource):
                     }
                 else:
                     prediction_data['fixture'] = None
+                    # Debug: print first few unmatched
+                    if len(predictions) < 3:
+                        print(f"DEBUG GET predictions: No fixture found for prediction: {game.home_team} vs {game.away_team}")
                 
                 predictions.append(prediction_data)
             
-            return make_response({'predictions': predictions}, 200)
+            print(f"DEBUG GET predictions: Total predictions: {len(predictions)}, Fixtures found: {fixtures_found}, Completed: {fixtures_completed}")
+            
+            return make_response({
+                'predictions': predictions,
+                'debug': {
+                    'total_predictions': len(predictions),
+                    'fixtures_found': fixtures_found,
+                    'fixtures_completed': fixtures_completed
+                }
+            }, 200)
             
         except Exception as e:
             print(f"Error fetching predictions: {str(e)}")
@@ -678,6 +706,7 @@ def sync_fixture_scores():
     Sync completed fixtures with actual scores from the Premier League API.
     Updates fixtures that have been played with their actual scores.
     """
+    print("DEBUG sync-scores: Function called")
     try:
         if not REQUESTS_AVAILABLE:
             return make_response({
@@ -747,16 +776,55 @@ def sync_fixture_scores():
         
         fixtures_updated = 0
         fixtures_with_scores = 0
+        fixtures_not_found = 0
+        matches_with_scores = 0
         
-        for match_data in all_items:
-            # Extract match information
+        print(f"DEBUG sync-scores: Fetched {len(all_items)} total matches from API across {pages_fetched} pages")
+        
+        # Debug: print first match structure
+        if all_items and len(all_items) > 0:
+            sample = all_items[0]
+            print("=" * 80)
+            print("DEBUG sync-scores: Sample match structure:")
+            print(f"Sample match keys: {list(sample.keys())[:30] if isinstance(sample, dict) else 'not a dict'}")
+            if isinstance(sample, dict):
+                if 'score' in sample:
+                    print(f"Score structure: {sample['score']}")
+                else:
+                    print("DEBUG: No 'score' key in match data")
+                if 'status' in sample:
+                    print(f"Status structure: {sample['status']}")
+                else:
+                    print("DEBUG: No 'status' key in match data")
+                # Check for alternative keys
+                for key in ['matchStatus', 'state', 'completed', 'finished', 'result']:
+                    if key in sample:
+                        print(f"Found alternative key '{key}': {sample[key]}")
+                import json
+                print(f"Sample match (first 1200 chars): {json.dumps(sample, indent=2, default=str)[:1200]}")
+            print("=" * 80)
+        
+        print(f"DEBUG sync-scores: Processing {len(all_items)} matches from API")
+        
+        for idx, match_data in enumerate(all_items):
+            # Extract match information and scores (scores are nested in homeTeam/awayTeam)
             home_team = None
             away_team = None
+            actual_home_score = None
+            actual_away_score = None
+            is_completed = False
             
             if 'homeTeam' in match_data:
                 home_team_data = match_data['homeTeam']
                 if isinstance(home_team_data, dict):
                     home_team = home_team_data.get('name') or home_team_data.get('shortName')
+                    # Check for score nested in homeTeam
+                    if 'score' in home_team_data:
+                        score_val = home_team_data.get('score')
+                        if score_val is not None:
+                            actual_home_score = int(score_val)
+                            if idx < 3:
+                                print(f"DEBUG sync-scores: Match {idx} found home score in homeTeam: {actual_home_score}")
                 else:
                     home_team = str(home_team_data)
             
@@ -764,71 +832,190 @@ def sync_fixture_scores():
                 away_team_data = match_data['awayTeam']
                 if isinstance(away_team_data, dict):
                     away_team = away_team_data.get('name') or away_team_data.get('shortName')
+                    # Check for score nested in awayTeam
+                    if 'score' in away_team_data:
+                        score_val = away_team_data.get('score')
+                        if score_val is not None:
+                            actual_away_score = int(score_val)
+                            if idx < 3:
+                                print(f"DEBUG sync-scores: Match {idx} found away score in awayTeam: {actual_away_score}")
                 else:
                     away_team = str(away_team_data)
             
             if not home_team or not away_team:
+                if idx < 3:
+                    print(f"DEBUG sync-scores: Skipping match {idx} - missing team names: home={home_team}, away={away_team}")
                 continue
             
-            # Extract actual scores from the match
-            actual_home_score = None
-            actual_away_score = None
-            is_completed = False
+            # Debug: Show structure for first few matches
+            if idx < 3:
+                print(f"DEBUG sync-scores: Match {idx} structure - keys: {list(match_data.keys())[:20]}")
+                if 'score' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} score structure: {match_data['score']}")
+                if 'status' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} status structure: {match_data['status']}")
+                # Check alternative fields
+                if 'resultType' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} resultType: {match_data['resultType']}")
+                if 'period' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} period: {match_data['period']}")
+                if 'clock' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} clock: {match_data['clock']}")
             
             # Check for scores in various possible locations
+            # First check alternative fields that might contain scores
+            if 'period' in match_data:
+                period_data = match_data['period']
+                if isinstance(period_data, dict):
+                    # Check if period has score information
+                    if 'homeScore' in period_data or 'awayScore' in period_data:
+                        actual_home_score = period_data.get('homeScore') or period_data.get('home')
+                        actual_away_score = period_data.get('awayScore') or period_data.get('away')
+                        if idx < 3:
+                            print(f"DEBUG sync-scores: Match {idx} found scores in period: {actual_home_score}-{actual_away_score}")
+            
+            # Also check if there's a nested structure with scores
+            if actual_home_score is None and 'result' in match_data:
+                result_data = match_data['result']
+                if isinstance(result_data, dict):
+                    actual_home_score = result_data.get('homeScore') or result_data.get('home')
+                    actual_away_score = result_data.get('awayScore') or result_data.get('away')
+                    if idx < 3 and actual_home_score is not None:
+                        print(f"DEBUG sync-scores: Match {idx} found scores in result: {actual_home_score}-{actual_away_score}")
+            
+            # Check for scores in various possible locations (original check)
             if 'score' in match_data:
                 score_data = match_data['score']
+                if idx < 3:
+                    print(f"DEBUG sync-scores: Match {idx} has 'score' key: {score_data}")
                 if isinstance(score_data, dict):
                     # Try different score field names
                     if 'fullTime' in score_data:
                         ft = score_data['fullTime']
                         if isinstance(ft, dict):
-                            actual_home_score = ft.get('home') or ft.get('homeScore')
-                            actual_away_score = ft.get('away') or ft.get('awayScore')
+                            actual_home_score = ft.get('home') or ft.get('homeScore') or ft.get('homeTeam')
+                            actual_away_score = ft.get('away') or ft.get('awayScore') or ft.get('awayTeam')
+                            if idx < 3:
+                                print(f"DEBUG sync-scores: Match {idx} fullTime scores: {actual_home_score}-{actual_away_score}")
                     elif 'home' in score_data and 'away' in score_data:
                         actual_home_score = score_data.get('home')
                         actual_away_score = score_data.get('away')
+                        if idx < 3:
+                            print(f"DEBUG sync-scores: Match {idx} direct scores: {actual_home_score}-{actual_away_score}")
                     elif 'homeScore' in score_data and 'awayScore' in score_data:
                         actual_home_score = score_data.get('homeScore')
                         actual_away_score = score_data.get('awayScore')
+                        if idx < 3:
+                            print(f"DEBUG sync-scores: Match {idx} homeScore/awayScore: {actual_home_score}-{actual_away_score}")
+                    # Also check for regularTime or other time periods
+                    for period_key in ['regularTime', 'halfTime', 'extraTime', 'penalties']:
+                        if period_key in score_data and isinstance(score_data[period_key], dict):
+                            period = score_data[period_key]
+                            if actual_home_score is None:
+                                actual_home_score = period.get('home') or period.get('homeScore')
+                            if actual_away_score is None:
+                                actual_away_score = period.get('away') or period.get('awayScore')
+            elif idx < 3:
+                print(f"DEBUG sync-scores: Match {idx} has NO 'score' key")
             
             # Check status to see if match is completed
-            if 'status' in match_data:
-                status = match_data['status']
-                if isinstance(status, dict):
-                    status_type = status.get('type') or status.get('name') or status.get('state')
-                    if status_type in ['FT', 'FINISHED', 'COMPLETE', 'COMPLETED']:
+            # ONLY mark as completed if period is exactly "FullTime" - this is the definitive indicator
+            # Do NOT use resultType, clock, or status fields as they may indicate in-progress games
+            if 'period' in match_data:
+                period_data = match_data['period']
+                if idx < 3:
+                    print(f"DEBUG sync-scores: Match {idx} period: {period_data}")
+                if isinstance(period_data, dict):
+                    period_type = period_data.get('type') or period_data.get('label') or period_data.get('name')
+                    # Only accept "FullTime" (case-insensitive) - be strict about this
+                    if period_type and str(period_type).upper() in ['FULLTIME', 'FULL_TIME']:
                         is_completed = True
-                elif isinstance(status, str):
-                    if status.upper() in ['FT', 'FINISHED', 'COMPLETE', 'COMPLETED']:
+                        if idx < 3:
+                            print(f"DEBUG sync-scores: Match {idx} marked as completed based on period: {period_data}")
+                elif isinstance(period_data, str):
+                    period_str = str(period_data).upper()
+                    # Only accept "FullTime" (case-insensitive) - be strict about this
+                    if period_str in ['FULLTIME', 'FULL_TIME']:
                         is_completed = True
+                        if idx < 3:
+                            print(f"DEBUG sync-scores: Match {idx} marked as completed based on period: {period_data}")
             
-            # If we have scores, assume it's completed
+            # Count matches with scores (but don't assume completion - only period/resultType determine completion)
             if actual_home_score is not None and actual_away_score is not None:
-                is_completed = True
-                fixtures_with_scores += 1
+                matches_with_scores += 1
+                if matches_with_scores <= 3:
+                    print(f"DEBUG sync-scores: Match {idx} has scores: {home_team} {actual_home_score}-{actual_away_score} {away_team}, is_completed={is_completed}")
             
-            # Find matching fixture in database
+            # Find matching fixture in database - use case-insensitive matching
+            fixture = None
+            # Try exact match first
             fixture = Fixture.query.filter_by(
                 fixture_home_team=home_team,
                 fixture_away_team=away_team
             ).first()
             
-            if fixture and is_completed:
-                # Update fixture with actual scores
-                if actual_home_score is not None:
-                    fixture.actual_home_score = int(actual_home_score)
-                if actual_away_score is not None:
-                    fixture.actual_away_score = int(actual_away_score)
-                fixture.is_completed = True
-                fixtures_updated += 1
+            # If not found, try case-insensitive
+            if not fixture:
+                all_fixtures = Fixture.query.all()
+                for f in all_fixtures:
+                    if (f.fixture_home_team and f.fixture_away_team and 
+                        f.fixture_home_team.lower().strip() == home_team.lower().strip() and
+                        f.fixture_away_team.lower().strip() == away_team.lower().strip()):
+                        fixture = f
+                        break
+            
+            if fixture:
+                # Debug: show what we found
+                if idx < 5:
+                    print(f"DEBUG sync-scores: Match {idx} - Found fixture {fixture.id}: {home_team} vs {away_team}, period={match_data.get('period')}, is_completed={is_completed}, has_scores={actual_home_score is not None and actual_away_score is not None}")
+                
+                # Always update is_completed based on whether period is FullTime
+                # This ensures we reset incorrectly marked games
+                if is_completed and (actual_home_score is not None or actual_away_score is not None):
+                    # Period is FullTime - update fixture with actual scores and mark as completed
+                    if actual_home_score is not None:
+                        fixture.actual_home_score = int(actual_home_score)
+                    if actual_away_score is not None:
+                        fixture.actual_away_score = int(actual_away_score)
+                    fixture.is_completed = True
+                    fixtures_updated += 1
+                    fixtures_with_scores += 1
+                    # Debug first few updates
+                    if fixtures_updated <= 3:
+                        print(f"DEBUG sync-scores: Updated fixture {fixture.id}: {home_team} {actual_home_score}-{actual_away_score} {away_team}, marked as completed (FullTime)")
+                elif fixture.is_completed:
+                    # Game was previously marked as completed but period is NOT FullTime - reset it
+                    # Also clear scores since they're not final
+                    fixture.is_completed = False
+                    fixture.actual_home_score = None
+                    fixture.actual_away_score = None
+                    fixtures_updated += 1
+                    if idx < 5:
+                        print(f"DEBUG sync-scores: Reset fixture {fixture.id} is_completed to False and cleared scores (period is not FullTime): {home_team} vs {away_team}, period={match_data.get('period')}")
+                elif idx < 5:
+                    print(f"DEBUG sync-scores: Match {idx} - Not updating fixture (is_completed={is_completed}, scores={actual_home_score}-{actual_away_score})")
+            else:
+                fixtures_not_found += 1
+                # Debug: print first few unmatched fixtures
+                if fixtures_not_found <= 5:
+                    print(f"DEBUG sync-scores: Could not find fixture for: {home_team} vs {away_team}")
+                    # Show what fixtures we have in DB for debugging
+                    if fixtures_not_found == 1:
+                        sample_fixtures = Fixture.query.limit(5).all()
+                        print(f"DEBUG: Sample fixtures in DB:")
+                        for f in sample_fixtures:
+                            print(f"  - {f.fixture_home_team} vs {f.fixture_away_team} (id={f.id}, completed={f.is_completed}, scores={f.actual_home_score}-{f.actual_away_score})")
         
         db.session.commit()
+        
+        print(f"DEBUG sync-scores SUMMARY: Updated {fixtures_updated} fixtures, {matches_with_scores} matches had scores, {fixtures_not_found} fixtures not found, {pages_fetched} pages fetched")
         
         return make_response({
             'message': 'Fixture scores synced successfully',
             'fixtures_updated': fixtures_updated,
             'fixtures_with_scores': fixtures_with_scores,
+            'matches_with_scores': matches_with_scores,
+            'fixtures_not_found': fixtures_not_found,
             'pages_fetched': pages_fetched
         }, 200)
         
@@ -859,20 +1046,45 @@ def check_prediction_results():
         wins = 0
         draws = 0
         losses = 0
+        fixtures_not_found = 0
+        fixtures_not_completed = 0
+        fixtures_no_scores = 0
+        
+        print(f"DEBUG check-results: Checking {len(user_games)} predictions for user {user_id}")
         
         for game in user_games:
-            # Find matching fixture
+            # Find matching fixture - try exact match first
             fixture = Fixture.query.filter_by(
                 fixture_home_team=game.home_team,
                 fixture_away_team=game.away_team
             ).first()
             
-            if not fixture or not fixture.is_completed:
-                # Fixture not found or not completed yet, skip
+            # If not found, try case-insensitive match
+            if not fixture:
+                all_fixtures = Fixture.query.all()
+                for f in all_fixtures:
+                    if (f.fixture_home_team and f.fixture_away_team and 
+                        f.fixture_home_team.lower().strip() == game.home_team.lower().strip() and
+                        f.fixture_away_team.lower().strip() == game.away_team.lower().strip()):
+                        fixture = f
+                        break
+            
+            if not fixture:
+                fixtures_not_found += 1
+                if fixtures_not_found <= 3:
+                    print(f"DEBUG check-results: Fixture not found for prediction: {game.home_team} vs {game.away_team}")
+                continue
+            
+            if not fixture.is_completed:
+                fixtures_not_completed += 1
+                if fixtures_not_completed <= 3:
+                    print(f"DEBUG check-results: Fixture not completed: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, is_completed={fixture.is_completed}")
                 continue
             
             if fixture.actual_home_score is None or fixture.actual_away_score is None:
-                # No actual scores yet, skip
+                fixtures_no_scores += 1
+                if fixtures_no_scores <= 3:
+                    print(f"DEBUG check-results: Fixture has no scores: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, is_completed={fixture.is_completed}, scores={fixture.actual_home_score}-{fixture.actual_away_score}")
                 continue
             
             # Get predicted and actual scores
@@ -927,7 +1139,10 @@ def check_prediction_results():
             'wins': wins,
             'draws': draws,
             'losses': losses,
-            'total_checked': len(user_games)
+            'total_checked': len(user_games),
+            'fixtures_not_found': fixtures_not_found,
+            'fixtures_not_completed': fixtures_not_completed,
+            'fixtures_no_scores': fixtures_no_scores
         }, 200)
         
     except Exception as e:
