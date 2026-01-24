@@ -628,8 +628,8 @@ class PredictionsResource(Resource):
             if not fixture_id or home_team_score is None or away_team_score is None:
                 return make_response({'error': 'Missing required fields: fixture_id, home_team_score, away_team_score'}, 400)
             
-            # Get the fixture
-            fixture = Fixture.query.get(fixture_id)
+            # Get the fixture - use filter_by().first() instead of .get() for compatibility
+            fixture = Fixture.query.filter_by(id=fixture_id).first()
             if not fixture:
                 return make_response({'error': 'Fixture not found'}, 404)
             
