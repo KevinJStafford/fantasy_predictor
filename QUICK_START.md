@@ -73,7 +73,19 @@ postgresql://fantasy_predictor_user:SvSSFDWawNA5mKQQQlim1ZxqEudZbIVN@dpg-d5qgtr6
    ```
 4. Click **"Save Changes"** (this will trigger a redeploy)
 
-### 4. Test Your Deployment
+### 4. Run Database Migrations (If Needed)
+
+**Migrations should run automatically during build**, but if you need to run them manually:
+
+1. Make a POST request to: `https://your-backend-url.onrender.com/api/v1/migrate`
+2. You can use:
+   - **curl**: `curl -X POST https://your-backend-url.onrender.com/api/v1/migrate`
+   - Or use a tool like Postman
+   - Or visit in browser (though POST is required)
+
+**Note**: Shell access requires a paid plan. The migration endpoint works on free tier.
+
+### 5. Test Your Deployment
 
 1. Visit your frontend URL
 2. Try creating an account

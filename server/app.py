@@ -1189,6 +1189,24 @@ def login():
 def index():
     return '<h1>Project Server</h1>'
 
+@app.route('/api/v1/migrate', methods=['POST'])
+def run_migrations():
+    """
+    Run database migrations manually.
+    This endpoint allows running migrations without shell access.
+    SECURITY: In production, you may want to add authentication or remove this endpoint.
+    """
+    try:
+        from flask_migrate import upgrade
+        upgrade()
+        return make_response({'message': 'Database migrations completed successfully'}, 200)
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Migration error: {str(e)}")
+        print(f"Traceback: {error_details}")
+        return make_response({'error': str(e), 'details': error_details.split('\n')[-5:]}, 500)
+
 
 if __name__ == '__main__':
     import os

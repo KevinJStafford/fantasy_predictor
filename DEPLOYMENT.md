@@ -92,14 +92,23 @@ git push origin main
 
 ## Step 6: Run Database Migrations
 
-1. Go to your **Backend API** service
-2. Click **"Shell"** tab
-3. Run:
-   ```bash
-   cd server
-   flask db upgrade
-   ```
-4. This will create all your database tables
+**Option 1: Automatic (Recommended)**
+- Migrations run automatically during build (already configured in build command)
+- Check the build logs to confirm migrations ran successfully
+
+**Option 2: Manual via API Endpoint (Free Tier)**
+If migrations didn't run during build, you can trigger them manually:
+
+1. Make a POST request to: `https://your-backend-url.onrender.com/api/v1/migrate`
+2. You can use:
+   - **curl**: `curl -X POST https://your-backend-url.onrender.com/api/v1/migrate`
+   - **Browser extension** (like REST Client)
+   - **Postman** or similar tool
+   - Or visit the URL in browser (though POST is required)
+
+**Option 3: Shell (Paid Tier Only)**
+- Shell access requires a paid plan ($7/month)
+- If you upgrade, you can use: `cd server && flask db upgrade`
 
 ## Step 7: Test Your Deployment
 
