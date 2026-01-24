@@ -63,7 +63,7 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
             setSaving(true)
             setMessage(null)
             
-            fetch('/api/v1/predictions', {
+            fetch(apiUrl('/api/v1/predictions'), {
                 method: 'POST',
                 headers: {
                     "Content-Type": 'application/json'

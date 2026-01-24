@@ -67,3 +67,33 @@ package-lock.json
 
 # secret key
 secret_keys.py
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Build outputs
+client/build
+client/dist
+
+# Python cache
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Production build
+client/build
+server/__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Gunicorn
+*.pid

@@ -1,6 +1,7 @@
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
+import { apiUrl } from '../utils/api';
 
 import Navbar from './Navbar'
 
@@ -19,7 +20,7 @@ function Login({setUser}) {
         },
         validationSchema: loginSchema,
         onSubmit: (values) => {
-            fetch('/api/v1/login', {
+            fetch(apiUrl('/api/v1/login'), {
                 method: 'POST',
                 headers: {
                     "Content-type": 'application/json'

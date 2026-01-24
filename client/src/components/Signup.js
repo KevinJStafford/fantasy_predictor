@@ -28,7 +28,7 @@ function Signup({setUser}) {
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
-            fetch('/api/v1/users', {
+            fetch(apiUrl('/api/v1/users'), {
                 method: 'POST',
                 headers: {
                     "Content-type": 'application/json'

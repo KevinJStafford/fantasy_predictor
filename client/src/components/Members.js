@@ -3,6 +3,7 @@ import Navbar from './Navbar'
 import Predictions from './Predictions'
 import {useEffect, useState} from 'react'
 import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Divider } from '@mui/material'
+import { apiUrl } from '../utils/api'
 
 
 function Members() {
@@ -36,7 +37,7 @@ function Members() {
 
     function getFixtures(roundNumber = null) {
         setLoadingFixtures(true)
-        const url = roundNumber ? `/api/v1/fixtures/${roundNumber}` : '/api/v1/fixtures'
+        const url = roundNumber ? apiUrl(`/api/v1/fixtures/${roundNumber}`) : apiUrl('/api/v1/fixtures')
         fetch(url)
         .then(response => {
             if (!response.ok) {
@@ -69,7 +70,7 @@ function Members() {
         setSyncing(true)
         setSyncMessage(null)
         
-        fetch('/api/v1/fixtures/sync', {
+        fetch(apiUrl('/api/v1/fixtures/sync'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -131,7 +132,7 @@ function Members() {
 
     function getPredictions() {
         setLoadingPredictions(true)
-        fetch('/api/v1/predictions')
+        fetch(apiUrl('/api/v1/predictions'))
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to fetch predictions')
@@ -208,7 +209,7 @@ function Members() {
                                 throw new Error(data.error || 'Failed to sync scores')
                             }
                             // After syncing scores, check results
-                                return fetch('/api/v1/predictions/check-results', { method: 'POST' })
+                                return fetch(apiUrl('/api/v1/predictions/check-results'), { method: 'POST' })
                                 .then(res => res.json())
                                 .then((resultData) => {
                                     getPredictions() // Refresh results

@@ -1191,5 +1191,9 @@ def index():
 
 
 if __name__ == '__main__':
-    app.run(port=5555, debug=True)
+    import os
+    port = int(os.getenv('PORT', 5555))
+    host = os.getenv('HOST', '0.0.0.0')
+    debug = os.getenv('FLASK_ENV', 'development') == 'development'
+    app.run(port=port, host=host, debug=debug)
 
