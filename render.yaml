@@ -22,6 +22,8 @@ services:
         value: https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100
       - key: CORS_ORIGINS
         sync: false
+      - key: PYTHONWARNINGS
+        value: ignore::DeprecationWarning:sqlalchemy
 
   # Frontend Static Site
   - type: web

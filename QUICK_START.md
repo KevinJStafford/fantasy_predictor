@@ -35,6 +35,7 @@ postgresql://fantasy_predictor_user:SvSSFDWawNA5mKQQQlim1ZxqEudZbIVN@dpg-d5qgtr6
    DATABASE_URL = postgresql://fantasy_predictor_user:SvSSFDWawNA5mKQQQlim1ZxqEudZbIVN@dpg-d5qgtr6r433s73835s5g-a/fantasy_predictor
    EXTERNAL_FIXTURES_API_URL = https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100
    CORS_ORIGINS = [Leave empty for now - set after frontend is deployed]
+   PYTHONWARNINGS = ignore::DeprecationWarning:sqlalchemy
    ```
 
 6. Click **"Create Web Service"**

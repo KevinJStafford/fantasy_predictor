@@ -1,6 +1,11 @@
 # Standard library imports
 import os
+import warnings
 from urllib.parse import urlparse
+
+# Suppress SQLAlchemy 2.0 deprecation warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='sqlalchemy')
+warnings.filterwarnings('ignore', message='.*Query.get.*', category=DeprecationWarning)
 
 # Remote library imports
 from flask import Flask

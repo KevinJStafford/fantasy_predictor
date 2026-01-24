@@ -57,6 +57,7 @@ git push origin main
    - `DATABASE_URL` = (Use the Internal Database URL from Step 2)
    - `EXTERNAL_FIXTURES_API_URL` = `https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100`
    - `CORS_ORIGINS` = (Leave empty for now, we'll set after frontend is deployed)
+   - `PYTHONWARNINGS` = `ignore::DeprecationWarning:sqlalchemy` (Suppresses SQLAlchemy deprecation warnings)
 5. Click **"Create Web Service"**
 6. **Copy the service URL** (e.g., `https://fantasy-predictor-api.onrender.com`)
 
