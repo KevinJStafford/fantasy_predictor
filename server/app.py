@@ -2,15 +2,8 @@
 
 # Standard library imports
 import os
-import warnings
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone
-
-# Suppress SQLAlchemy deprecation warnings - set before any SQLAlchemy imports
-import warnings
-warnings.filterwarnings('ignore', category=DeprecationWarning)
-warnings.filterwarnings('ignore', message='.*Query.get.*')
-warnings.filterwarnings('ignore', message='.*LegacyAPIWarning.*')
 
 # Remote library imports
 from flask import request, make_response, session
@@ -635,8 +628,8 @@ class PredictionsResource(Resource):
             if not fixture_id or home_team_score is None or away_team_score is None:
                 return make_response({'error': 'Missing required fields: fixture_id, home_team_score, away_team_score'}, 400)
             
-            # Get the fixture - use filter_by().first() instead of .get() for compatibility
-            fixture = Fixture.query.filter_by(id=fixture_id).first()
+            # Get the fixture
+            fixture = Fixture.query.get(fixture_id)
             if not fixture:
                 return make_response({'error': 'Fixture not found'}, 404)
             

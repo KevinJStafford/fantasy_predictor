@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     pythonVersion: 3.11
-    buildCommand: PYTHONWARNINGS=ignore pip install -r requirements.txt && cd server && PYTHONWARNINGS=ignore flask db upgrade
+    buildCommand: pip install -r requirements.txt && cd server && flask db upgrade
     startCommand: cd server && gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: FLASK_APP
@@ -22,8 +22,6 @@ services:
         value: https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100
       - key: CORS_ORIGINS
         sync: false
-      - key: PYTHONWARNINGS
-        value: ignore::DeprecationWarning:sqlalchemy
 
   # Frontend Static Site
   - type: web
