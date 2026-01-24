@@ -1,10 +1,12 @@
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
+import {useHistory} from 'react-router-dom';
 
 import Navbar from './Navbar'
 
 function Signup({setUser}) {
+    const history = useHistory();
 
     const signupSchema = yup.object().shape({
         username: yup.string()
@@ -36,6 +38,7 @@ function Signup({setUser}) {
                 if (resp.ok) {
                     resp.json().then(({user}) => {
                     setUser(user)
+                    history.push('/player')
                     })
                 } else {
                     console.log('errors? handle error')

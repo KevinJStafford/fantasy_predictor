@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 # Standard library imports
+import os
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from datetime import datetime, timedelta, timezone
 
 # Remote library imports
 from flask import request, make_response, session
@@ -11,31 +14,929 @@ from config import app, db, api
 # Add your model imports
 from models import User, Game, Prediction, Fixture
 
+# Note: Renamed Predictions Resource class to avoid conflict with model
+# The endpoint /api/v1/predictions uses the PredictionsResource class below
+
+# Ensure requests module is available
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    print("=" * 80)
+    print("WARNING: 'requests' module is not available!")
+    print("The sync fixtures endpoint will not work.")
+    print("Please ensure you're running the server with: pipenv run python app.py")
+    print("Or activate the virtual environment first: pipenv shell")
+    print("=" * 80)
+
 # Views go here!
 class Users(Resource):
     def post(self):
         try:
             data = request.get_json()
-            user = User(username=data['username'], email=data['email'], password_hash=data['password'])
+            # Handle empty email - make it None if empty string
+            email = data.get('email') if data.get('email') and data.get('email').strip() else None
+            user = User(username=data['username'], email=email, password_hash=data['password'])
             db.session.add(user)
             db.session.commit()
             session['user_id'] = user.id
             return make_response({'user': user.to_dict()}, 201)
         except Exception as e:
             db.session.rollback()
+            # Print error to console for debugging
+            print(f"Error creating user: {str(e)}")
             return make_response({'error': str(e)}, 500)
     
 api.add_resource(Users, '/api/v1/users')
 
 class Fixtures(Resource):
-    def get(self):
-        fixtures = [f.to_dict() for f in Fixture.query.all()]
-        if not fixtures:
-            return make_response({"error": "No fixtures found"}, 404)
+    def get(self, round_number=None):
+        """Get all fixtures or fixtures for a specific round"""
+        if round_number:
+            fixtures = [
+                f.to_dict()
+                for f in Fixture.query.filter_by(fixture_round=round_number)
+                .order_by(Fixture.fixture_date.asc())
+                .all()
+            ]
         else:
-            return make_response(fixtures, 200)
+            fixtures = [
+                f.to_dict()
+                for f in Fixture.query.order_by(Fixture.fixture_date.asc()).all()
+            ]
+        return make_response(fixtures, 200)
 
-api.add_resource(Fixtures, '/api/v1/fixtures')
+api.add_resource(Fixtures, '/api/v1/fixtures', '/api/v1/fixtures/<int:round_number>')
+
+@app.route('/api/v1/fixtures/rounds', methods=['GET'])
+def get_available_rounds():
+    """Get all available game week rounds from fixtures"""
+    try:
+        # Get distinct rounds from fixtures, excluding None values
+        rounds = db.session.query(Fixture.fixture_round).distinct().filter(Fixture.fixture_round.isnot(None)).order_by(Fixture.fixture_round).all()
+        round_numbers = [r[0] for r in rounds]
+        
+        # Debug: Check how many fixtures have rounds vs None
+        total_fixtures = Fixture.query.count()
+        fixtures_with_rounds = Fixture.query.filter(Fixture.fixture_round.isnot(None)).count()
+        fixtures_without_rounds = total_fixtures - fixtures_with_rounds
+        
+        print(f"DEBUG get_available_rounds: Total fixtures: {total_fixtures}, With rounds: {fixtures_with_rounds}, Without rounds: {fixtures_without_rounds}")
+        
+        # If no rounds found but fixtures exist, get a sample fixture to see what we have
+        if len(round_numbers) == 0 and total_fixtures > 0:
+            sample_fixture = Fixture.query.first()
+            if sample_fixture:
+                print(f"DEBUG: Sample fixture: round={sample_fixture.fixture_round}, home={sample_fixture.fixture_home_team}, away={sample_fixture.fixture_away_team}")
+            
+            # Return empty rounds with info - frontend can still work if we update it
+            return make_response({
+                'rounds': [],
+                'warning': f'No rounds found in {total_fixtures} fixtures. Check backend console for API structure debug output.',
+                'total_fixtures': total_fixtures,
+                'fixtures_with_rounds': fixtures_with_rounds,
+                'fixtures_without_rounds': fixtures_without_rounds
+            }, 200)
+        
+        return make_response({
+            'rounds': round_numbers, 
+            'total_fixtures': total_fixtures,
+            'fixtures_with_rounds': fixtures_with_rounds
+        }, 200)
+    except Exception as e:
+        import traceback
+        print(f"Error in get_available_rounds: {str(e)}")
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+@app.route('/api/v1/fixtures/sync', methods=['POST'])
+def sync_fixtures():
+    """
+    Fetch fixtures from external API and store them in the database.
+    Expects JSON body with 'api_url' field, or uses EXTERNAL_FIXTURES_API_URL env variable.
+    """
+    try:
+        if not REQUESTS_AVAILABLE:
+            return make_response({
+                'error': 'Requests module is not available. Please run the server with pipenv: pipenv run python app.py'
+            }, 500)
+        
+        data = request.get_json() or {}
+        api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+        
+        if not api_url:
+            return make_response({'error': 'API URL is required. Provide api_url in request body or set EXTERNAL_FIXTURES_API_URL environment variable.'}, 400)
+        
+        # Fetch fixtures from external API
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        # Force a higher limit so we aren't stuck with the first 100 matches
+        # (which often only covers early-season fixtures). We keep the user's
+        # URL/filters, but override `_limit` to 400.
+        effective_api_url = api_url
+        try:
+            parsed = urlparse(api_url)
+            if (
+                parsed.netloc.endswith("premier-league-prod.pulselive.com")
+                and parsed.path.endswith("/api/v2/matches")
+            ):
+                qs = parse_qs(parsed.query)
+                # Revert to "bulk sync" behavior: remove any date-window params if present
+                # and simply increase the limit.
+                qs.pop("startDate", None)
+                qs.pop("endDate", None)
+                qs.pop("fromDate", None)
+                qs.pop("toDate", None)
+                qs["_limit"] = ["400"]
+
+                effective_api_url = urlunparse(
+                    parsed._replace(query=urlencode(qs, doseq=True))
+                )
+        except Exception as e:
+            print(f"WARNING: could not rewrite api_url for _limit override: {e}")
+
+        # Fetch ALL matches using cursor pagination.
+        # This API returns:
+        #   { "pagination": { "_limit": 100, "_prev": null, "_next": "TOKEN" }, "data": [...] }
+        # The next page is requested by adding `&_next=TOKEN`.
+
+        # Normalize URL: ensure we don't carry a stale `_next` token from earlier runs.
+        parsed_eff = urlparse(effective_api_url)
+        qs_eff = parse_qs(parsed_eff.query)
+        qs_eff.pop("_next", None)
+        base_effective_api_url = urlunparse(parsed_eff._replace(query=urlencode(qs_eff, doseq=True)))
+
+        all_items = []
+        pages_fetched = 0
+        next_token = None
+        max_pages = 100  # safety; season is ~380 matches
+
+        while True:
+            if pages_fetched == 0:
+                page_url = base_effective_api_url
+            else:
+                # add `_next` token for subsequent pages
+                parsed_page = urlparse(base_effective_api_url)
+                qs_page = parse_qs(parsed_page.query)
+                qs_page["_next"] = [next_token]
+                page_url = urlunparse(parsed_page._replace(query=urlencode(qs_page, doseq=True)))
+
+            resp = requests.get(page_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            external_data = resp.json()
+
+            if not isinstance(external_data, dict):
+                return make_response({'error': 'Unexpected API response type', 'type': str(type(external_data))}, 500)
+
+            page_items = []
+            if "data" in external_data and isinstance(external_data["data"], list):
+                page_items = external_data["data"]
+            elif "content" in external_data and isinstance(external_data["content"], list):
+                page_items = external_data["content"]
+            elif "matches" in external_data and isinstance(external_data["matches"], list):
+                page_items = external_data["matches"]
+
+            all_items.extend(page_items)
+            pages_fetched += 1
+
+            pagination = external_data.get("pagination") if isinstance(external_data.get("pagination"), dict) else {}
+            next_token = pagination.get("_next")
+
+            if not next_token:
+                break
+            if pages_fetched >= max_pages:
+                print("WARNING: pagination max_pages reached; stopping early")
+                break
+
+        external_data = {"data": all_items, "pagination": {"pages_fetched": pages_fetched}}
+        
+        # Parse and store fixtures (bulk sync)
+        # Premier League API typically returns data in 'content' array
+        fixtures_added = 0
+        fixtures_updated = 0
+        fixtures_seen = 0
+        fixtures_with_parsed_date = 0
+        parsed_min_date_utc = None
+        parsed_max_date_utc = None
+        
+        # Handle Premier League API response structure
+        fixtures_data = external_data.get('data', [])
+        
+        if not fixtures_data:
+            return make_response({'error': 'No fixtures found in API response', 'response_structure': str(external_data.keys() if isinstance(external_data, dict) else 'list')}, 400)
+        
+        # Debug: print first fixture structure to understand API response format
+        if fixtures_data and len(fixtures_data) > 0:
+            sample = fixtures_data[0]
+            print("=" * 80)
+            print("DEBUG: Sample fixture structure from Premier League API:")
+            print(f"Sample fixture keys: {list(sample.keys()) if isinstance(sample, dict) else 'not a dict'}")
+            if isinstance(sample, dict):
+                if 'round' in sample:
+                    print(f"Round structure: {sample['round']}, type: {type(sample['round'])}")
+                    if isinstance(sample['round'], dict):
+                        print(f"Round dict keys: {list(sample['round'].keys())}")
+                        print(f"Round dict values: {sample['round']}")
+                # Print full sample to see structure
+                import json
+                print(f"Full sample fixture (first 1000 chars):")
+                print(json.dumps(sample, indent=2, default=str)[:1000])
+            print("=" * 80)
+        
+        for fixture_data in fixtures_data:
+            fixtures_seen += 1
+            # Map Premier League API fields to your Fixture model
+            # Premier League API structure: round, homeTeam.name, awayTeam.name, kickoff.label
+            fixture_round = None
+            
+            # Try various ways to get the round number from Premier League API
+            # The API typically has round information in nested structures
+            
+            # First try: round.roundNumber (most common Premier League API structure)
+            if 'round' in fixture_data:
+                round_data = fixture_data['round']
+                if isinstance(round_data, dict):
+                    # Premier League API often uses 'roundNumber' or 'number' inside round object
+                    fixture_round = (round_data.get('roundNumber') or 
+                                    round_data.get('number') or 
+                                    round_data.get('id') or
+                                    round_data.get('matchday') or
+                                    round_data.get('value'))
+                elif isinstance(round_data, (int, str)):
+                    fixture_round = round_data
+            # Second try: direct roundNumber field
+            elif 'roundNumber' in fixture_data:
+                fixture_round = fixture_data['roundNumber']
+            # Third try: matchday (common in some APIs)
+            elif 'matchday' in fixture_data:
+                fixture_round = fixture_data['matchday']
+            # Fourth try: gameweek
+            elif 'gameweek' in fixture_data:
+                fixture_round = fixture_data['gameweek']
+            # Fifth try: matchWeek (Premier League API)
+            elif 'matchWeek' in fixture_data:
+                fixture_round = fixture_data['matchWeek']
+            
+            # Fifth try: nested match.round structure
+            if not fixture_round and 'match' in fixture_data:
+                match_data = fixture_data['match']
+                if isinstance(match_data, dict):
+                    if 'round' in match_data:
+                        round_data = match_data['round']
+                        if isinstance(round_data, dict):
+                            fixture_round = (round_data.get('roundNumber') or 
+                                            round_data.get('number') or 
+                                            round_data.get('id'))
+                        else:
+                            fixture_round = round_data
+                    # Also check for roundNumber directly in match
+                    elif 'roundNumber' in match_data:
+                        fixture_round = match_data['roundNumber']
+            
+            # Sixth try: various other possible field names
+            if not fixture_round:
+                for key in ['matchWeek', 'matchweek', 'match_week', 'gameWeek', 'gameweek', 'week', 'weekNumber', 'round_id', 'roundId', 'matchRound', 'matchround', 'matchDay', 'match_day']:
+                    if key in fixture_data:
+                        try:
+                            value = fixture_data[key]
+                            if isinstance(value, dict):
+                                value = value.get('roundNumber') or value.get('number') or value.get('id')
+                            fixture_round = int(value) if value is not None else None
+                            if fixture_round:
+                                break
+                        except (ValueError, TypeError):
+                            pass
+            
+            # Seventh try: Look for round in competition or season data if nested
+            if not fixture_round:
+                for nested_key in ['competition', 'season', 'stage']:
+                    if nested_key in fixture_data and isinstance(fixture_data[nested_key], dict):
+                        nested_data = fixture_data[nested_key]
+                        if 'round' in nested_data:
+                            round_data = nested_data['round']
+                            if isinstance(round_data, dict):
+                                fixture_round = (round_data.get('roundNumber') or 
+                                                round_data.get('number') or 
+                                                round_data.get('id'))
+                            else:
+                                fixture_round = round_data
+                            if fixture_round:
+                                break
+            
+            # Eighth try: Look in status or metadata fields
+            if not fixture_round:
+                for meta_key in ['status', 'metadata', 'info', 'details']:
+                    if meta_key in fixture_data and isinstance(fixture_data[meta_key], dict):
+                        meta_data = fixture_data[meta_key]
+                        if 'round' in meta_data:
+                            round_val = meta_data['round']
+                            if isinstance(round_val, dict):
+                                fixture_round = round_val.get('roundNumber') or round_val.get('number') or round_val.get('id')
+                            else:
+                                fixture_round = round_val
+                            if fixture_round:
+                                break
+            
+            # Ninth try: If still no round, check if round info is in homeTeam or awayTeam metadata
+            if not fixture_round:
+                for team_key in ['homeTeam', 'awayTeam']:
+                    if team_key in fixture_data and isinstance(fixture_data[team_key], dict):
+                        team_data = fixture_data[team_key]
+                        # Sometimes round info is attached to team data
+                        if 'round' in team_data or 'matchRound' in team_data:
+                            round_val = team_data.get('round') or team_data.get('matchRound')
+                            if isinstance(round_val, dict):
+                                fixture_round = round_val.get('roundNumber') or round_val.get('number') or round_val.get('id')
+                            else:
+                                fixture_round = round_val
+                            if fixture_round:
+                                break
+            
+            # Debug: If still no round found, log the fixture structure (only for first few)
+            if not fixture_round:
+                # Only print detailed warning for first 3 fixtures to avoid spam
+                if fixtures_data.index(fixture_data) < 3:
+                    print(f"WARNING: Could not extract round for fixture {fixtures_data.index(fixture_data) + 1}")
+                    print(f"  Available top-level keys: {list(fixture_data.keys())[:15]}")
+                    # Print round-related keys if they exist with different casing
+                    round_keys = [k for k in fixture_data.keys() if 'round' in k.lower() or 'week' in k.lower() or 'matchday' in k.lower()]
+                    if round_keys:
+                        print(f"  Round-related keys found: {round_keys}")
+                        for rk in round_keys[:3]:  # Check first 3 round-related keys
+                            print(f"    {rk}: {fixture_data[rk]}")
+            
+            # Parse date/time
+            fixture_date_str = None
+            if 'kickoff' in fixture_data:
+                kickoff = fixture_data['kickoff']
+                if isinstance(kickoff, dict):
+                    # Prefer millis (reliable), fall back to label (often human-readable)
+                    fixture_date_str = kickoff.get('millis') or kickoff.get('label')
+                else:
+                    fixture_date_str = kickoff
+            elif 'date' in fixture_data:
+                fixture_date_str = fixture_data['date']
+            elif 'utcDate' in fixture_data:
+                fixture_date_str = fixture_data['utcDate']
+            
+            # Parse team names
+            home_team = None
+            away_team = None
+            
+            if 'homeTeam' in fixture_data:
+                home_team_data = fixture_data['homeTeam']
+                if isinstance(home_team_data, dict):
+                    home_team = home_team_data.get('name') or home_team_data.get('shortName')
+                else:
+                    home_team = str(home_team_data)
+            
+            if 'awayTeam' in fixture_data:
+                away_team_data = fixture_data['awayTeam']
+                if isinstance(away_team_data, dict):
+                    away_team = away_team_data.get('name') or away_team_data.get('shortName')
+                else:
+                    away_team = str(away_team_data)
+            
+            # Skip only if essential team data is missing
+            if not home_team or not away_team:
+                print(f"Skipping fixture due to missing team data: round={fixture_round}, home={home_team}, away={away_team}")
+                continue
+            
+            # Try to extract round from additional fields if still missing
+            if not fixture_round:
+                # Try extracting from roundId or similar fields
+                if 'roundId' in fixture_data:
+                    try:
+                        fixture_round = int(fixture_data['roundId'])
+                    except:
+                        pass
+            
+            # Convert fixture_round to integer if it exists, otherwise leave as None (field is nullable)
+            if fixture_round is not None:
+                try:
+                    fixture_round = int(fixture_round)
+                except (ValueError, TypeError):
+                    print(f"Warning: Could not convert round to integer: {fixture_round}. Saving without round.")
+                    fixture_round = None
+            else:
+                print(f"Info: No round found for fixture: home={home_team}, away={away_team}. Saving without round.")
+            
+            # Parse date if it's a string
+            fixture_date = None
+            if fixture_date_str:
+                try:
+                    # Handle millisecond timestamp
+                    if isinstance(fixture_date_str, (int, float)):
+                        fixture_date = datetime.fromtimestamp(fixture_date_str / 1000, tz=timezone.utc)
+                    elif isinstance(fixture_date_str, str) and fixture_date_str.isdigit():
+                        fixture_date = datetime.fromtimestamp(int(fixture_date_str) / 1000, tz=timezone.utc)
+                    elif isinstance(fixture_date_str, str):
+                        # Try parsing ISO format
+                        if 'T' in fixture_date_str:
+                            fixture_date_str = fixture_date_str.replace('Z', '+00:00')
+                            fixture_date = datetime.fromisoformat(fixture_date_str)
+                        else:
+                            # Try common date formats
+                            for fmt in [
+                                '%Y-%m-%d %H:%M:%S',
+                                '%Y-%m-%d',
+                                '%d/%m/%Y %H:%M',
+                                '%a %d %b %Y %H:%M',   # e.g. "Sat 16 Aug 2025 12:30"
+                                '%a %d %b %Y %H:%M %Z' # if timezone included
+                            ]:
+                                try:
+                                    fixture_date = datetime.strptime(fixture_date_str, fmt)
+                                    break
+                                except:
+                                    continue
+                except Exception as e:
+                    print(f"Could not parse date: {fixture_date_str}, error: {str(e)}")
+
+            if fixture_date:
+                fixtures_with_parsed_date += 1
+
+                # Track overall parsed date range (UTC)
+                if parsed_min_date_utc is None or fixture_date < parsed_min_date_utc:
+                    parsed_min_date_utc = fixture_date
+                if parsed_max_date_utc is None or fixture_date > parsed_max_date_utc:
+                    parsed_max_date_utc = fixture_date
+
+                # Normalize naive datetimes to UTC for storage consistency
+                if fixture_date.tzinfo is None:
+                    fixture_date = fixture_date.replace(tzinfo=timezone.utc)
+            
+            # Check if fixture already exists (by teams and round, or teams and date if round is None)
+            if fixture_round is not None:
+                existing_fixture = Fixture.query.filter_by(
+                    fixture_round=fixture_round,
+                    fixture_home_team=home_team,
+                    fixture_away_team=away_team
+                ).first()
+            else:
+                # If no round, check by teams and date if available
+                if fixture_date:
+                    existing_fixture = Fixture.query.filter_by(
+                        fixture_home_team=home_team,
+                        fixture_away_team=away_team,
+                        fixture_date=fixture_date
+                    ).first()
+                else:
+                    # Last resort: just check by teams
+                    existing_fixture = Fixture.query.filter_by(
+                        fixture_home_team=home_team,
+                        fixture_away_team=away_team
+                    ).first()
+            
+            if existing_fixture:
+                # Update existing fixture
+                if fixture_round is not None and existing_fixture.fixture_round != fixture_round:
+                    existing_fixture.fixture_round = fixture_round
+                if fixture_date:
+                    existing_fixture.fixture_date = fixture_date
+                fixtures_updated += 1
+            else:
+                # Create new fixture
+                new_fixture = Fixture(
+                    fixture_round=fixture_round,
+                    fixture_date=fixture_date,
+                    fixture_home_team=home_team,
+                    fixture_away_team=away_team
+                )
+                db.session.add(new_fixture)
+                fixtures_added += 1
+        
+        db.session.commit()
+        
+        return make_response({
+            'message': 'Fixtures synced successfully',
+            'api_url_used': effective_api_url,
+            'added': fixtures_added,
+            'updated': fixtures_updated,
+            'fixtures_seen': fixtures_seen,
+            'fixtures_with_parsed_date': fixtures_with_parsed_date,
+            'parsed_min_date_utc': parsed_min_date_utc.isoformat() if parsed_min_date_utc else None,
+            'parsed_max_date_utc': parsed_max_date_utc.isoformat() if parsed_max_date_utc else None,
+            'pages_fetched': external_data.get('pagination', {}).get('pages_fetched'),
+            'total_written': fixtures_added + fixtures_updated
+        }, 200)
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error syncing fixtures: {str(e)}")
+        print(f"Traceback: {error_details}")
+        
+        # Check if it's a requests-related error
+        if REQUESTS_AVAILABLE and hasattr(requests, 'exceptions') and isinstance(e, requests.exceptions.RequestException):
+            error_msg = f'Failed to fetch from external API: {str(e)}'
+            return make_response({'error': error_msg, 'type': 'RequestException'}, 500)
+        
+        # Return JSON error response
+        return make_response({'error': str(e), 'type': type(e).__name__, 'details': error_details.split('\n')[-5:]}, 500)
+
+class PredictionsResource(Resource):
+    def get(self):
+        """Get all predictions for the current user with their results"""
+        try:
+            user_id = session.get('user_id')
+            
+            if not user_id:
+                return make_response({'error': 'User not authenticated'}, 401)
+            
+            # Get all user's predictions
+            user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.desc()).all()
+            
+            predictions = []
+            for game in user_games:
+                # Find matching fixture to get actual scores
+                fixture = Fixture.query.filter_by(
+                    fixture_home_team=game.home_team,
+                    fixture_away_team=game.away_team
+                ).first()
+                
+                prediction_data = game.to_dict()
+                
+                # Add fixture and actual score info
+                if fixture:
+                    prediction_data['fixture'] = {
+                        'id': fixture.id,
+                        'round': fixture.fixture_round,
+                        'date': fixture.fixture_date.isoformat() if fixture.fixture_date else None,
+                        'is_completed': fixture.is_completed,
+                        'actual_home_score': fixture.actual_home_score,
+                        'actual_away_score': fixture.actual_away_score
+                    }
+                else:
+                    prediction_data['fixture'] = None
+                
+                predictions.append(prediction_data)
+            
+            return make_response({'predictions': predictions}, 200)
+            
+        except Exception as e:
+            print(f"Error fetching predictions: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return make_response({'error': str(e)}, 500)
+    
+    def post(self):
+        """Create or update a user's prediction for a fixture"""
+        try:
+            data = request.get_json()
+            user_id = session.get('user_id')
+            
+            if not user_id:
+                return make_response({'error': 'User not authenticated'}, 401)
+            
+            # Required fields: fixture_id, home_team_score, away_team_score
+            fixture_id = data.get('fixture_id')
+            home_team_score = data.get('home_team_score')
+            away_team_score = data.get('away_team_score')
+            
+            if not fixture_id or home_team_score is None or away_team_score is None:
+                return make_response({'error': 'Missing required fields: fixture_id, home_team_score, away_team_score'}, 400)
+            
+            # Get the fixture
+            fixture = Fixture.query.get(fixture_id)
+            if not fixture:
+                return make_response({'error': 'Fixture not found'}, 404)
+            
+            # Check if user already has a prediction for this fixture
+            existing_game = Game.query.filter_by(
+                user_id=user_id,
+                home_team=fixture.fixture_home_team,
+                away_team=fixture.fixture_away_team
+            ).first()
+            
+            if existing_game:
+                # Update existing prediction
+                existing_game.home_team_score = int(home_team_score)
+                existing_game.away_team_score = int(away_team_score)
+                existing_game.game_week_name = f"Week {fixture.fixture_round}" if fixture.fixture_round else "Unknown Week"
+                game = existing_game
+            else:
+                # Create new game/prediction
+                game = Game(
+                    user_id=user_id,
+                    home_team=fixture.fixture_home_team,
+                    away_team=fixture.fixture_away_team,
+                    home_team_score=int(home_team_score),
+                    away_team_score=int(away_team_score),
+                    game_week_name=f"Week {fixture.fixture_round}" if fixture.fixture_round else "Unknown Week",
+                    game_week=fixture.fixture_date
+                )
+                db.session.add(game)
+            
+            db.session.commit()
+            
+            # After saving, check if fixture is completed and update result
+            if fixture.is_completed and fixture.actual_home_score is not None and fixture.actual_away_score is not None:
+                # Determine result immediately
+                pred_home = game.home_team_score
+                pred_away = game.away_team_score
+                actual_home = fixture.actual_home_score
+                actual_away = fixture.actual_away_score
+                
+                if pred_home == actual_home and pred_away == actual_away:
+                    game.game_result = 'Win'
+                else:
+                    pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+                    actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+                    game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+                
+                db.session.commit()
+            
+            # Create or update prediction record linking user to game
+            prediction = Prediction.query.filter_by(
+                user_id=user_id,
+                game_id=game.id
+            ).first()
+            
+            if not prediction:
+                prediction = Prediction(user_id=user_id, game_id=game.id)
+                db.session.add(prediction)
+                db.session.commit()
+            
+            return make_response({'message': 'Prediction saved successfully', 'prediction': prediction.to_dict()}, 201)
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error saving prediction: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return make_response({'error': str(e)}, 500)
+
+api.add_resource(PredictionsResource, '/api/v1/predictions')
+
+@app.route('/api/v1/fixtures/sync-scores', methods=['POST'])
+def sync_fixture_scores():
+    """
+    Sync completed fixtures with actual scores from the Premier League API.
+    Updates fixtures that have been played with their actual scores.
+    """
+    try:
+        if not REQUESTS_AVAILABLE:
+            return make_response({
+                'error': 'Requests module is not available. Please run the server with pipenv: pipenv run python app.py'
+            }, 500)
+        
+        data = request.get_json() or {}
+        api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+        
+        if not api_url:
+            return make_response({'error': 'API URL is required. Provide api_url in request body or set EXTERNAL_FIXTURES_API_URL environment variable.'}, 400)
+        
+        # Force a higher limit and fetch all pages
+        effective_api_url = api_url
+        try:
+            parsed = urlparse(api_url)
+            if (
+                parsed.netloc.endswith("premier-league-prod.pulselive.com")
+                and parsed.path.endswith("/api/v2/matches")
+            ):
+                qs = parse_qs(parsed.query)
+                qs.pop("_next", None)
+                qs["_limit"] = ["400"]
+                effective_api_url = urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
+        except Exception as e:
+            print(f"WARNING: could not rewrite api_url for _limit override: {e}")
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        # Fetch all matches with pagination
+        all_items = []
+        pages_fetched = 0
+        next_token = None
+        max_pages = 100
+        
+        base_effective_api_url = effective_api_url
+        while True:
+            if pages_fetched == 0:
+                page_url = base_effective_api_url
+            else:
+                parsed_page = urlparse(base_effective_api_url)
+                qs_page = parse_qs(parsed_page.query)
+                qs_page["_next"] = [next_token]
+                page_url = urlunparse(parsed_page._replace(query=urlencode(qs_page, doseq=True)))
+            
+            resp = requests.get(page_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            external_data = resp.json()
+            
+            if not isinstance(external_data, dict):
+                return make_response({'error': 'Unexpected API response type', 'type': str(type(external_data))}, 500)
+            
+            page_items = external_data.get("data", [])
+            all_items.extend(page_items)
+            pages_fetched += 1
+            
+            pagination = external_data.get("pagination") if isinstance(external_data.get("pagination"), dict) else {}
+            next_token = pagination.get("_next")
+            
+            if not next_token:
+                break
+            if pages_fetched >= max_pages:
+                print("WARNING: pagination max_pages reached; stopping early")
+                break
+        
+        fixtures_updated = 0
+        fixtures_with_scores = 0
+        
+        for match_data in all_items:
+            # Extract match information
+            home_team = None
+            away_team = None
+            
+            if 'homeTeam' in match_data:
+                home_team_data = match_data['homeTeam']
+                if isinstance(home_team_data, dict):
+                    home_team = home_team_data.get('name') or home_team_data.get('shortName')
+                else:
+                    home_team = str(home_team_data)
+            
+            if 'awayTeam' in match_data:
+                away_team_data = match_data['awayTeam']
+                if isinstance(away_team_data, dict):
+                    away_team = away_team_data.get('name') or away_team_data.get('shortName')
+                else:
+                    away_team = str(away_team_data)
+            
+            if not home_team or not away_team:
+                continue
+            
+            # Extract actual scores from the match
+            actual_home_score = None
+            actual_away_score = None
+            is_completed = False
+            
+            # Check for scores in various possible locations
+            if 'score' in match_data:
+                score_data = match_data['score']
+                if isinstance(score_data, dict):
+                    # Try different score field names
+                    if 'fullTime' in score_data:
+                        ft = score_data['fullTime']
+                        if isinstance(ft, dict):
+                            actual_home_score = ft.get('home') or ft.get('homeScore')
+                            actual_away_score = ft.get('away') or ft.get('awayScore')
+                    elif 'home' in score_data and 'away' in score_data:
+                        actual_home_score = score_data.get('home')
+                        actual_away_score = score_data.get('away')
+                    elif 'homeScore' in score_data and 'awayScore' in score_data:
+                        actual_home_score = score_data.get('homeScore')
+                        actual_away_score = score_data.get('awayScore')
+            
+            # Check status to see if match is completed
+            if 'status' in match_data:
+                status = match_data['status']
+                if isinstance(status, dict):
+                    status_type = status.get('type') or status.get('name') or status.get('state')
+                    if status_type in ['FT', 'FINISHED', 'COMPLETE', 'COMPLETED']:
+                        is_completed = True
+                elif isinstance(status, str):
+                    if status.upper() in ['FT', 'FINISHED', 'COMPLETE', 'COMPLETED']:
+                        is_completed = True
+            
+            # If we have scores, assume it's completed
+            if actual_home_score is not None and actual_away_score is not None:
+                is_completed = True
+                fixtures_with_scores += 1
+            
+            # Find matching fixture in database
+            fixture = Fixture.query.filter_by(
+                fixture_home_team=home_team,
+                fixture_away_team=away_team
+            ).first()
+            
+            if fixture and is_completed:
+                # Update fixture with actual scores
+                if actual_home_score is not None:
+                    fixture.actual_home_score = int(actual_home_score)
+                if actual_away_score is not None:
+                    fixture.actual_away_score = int(actual_away_score)
+                fixture.is_completed = True
+                fixtures_updated += 1
+        
+        db.session.commit()
+        
+        return make_response({
+            'message': 'Fixture scores synced successfully',
+            'fixtures_updated': fixtures_updated,
+            'fixtures_with_scores': fixtures_with_scores,
+            'pages_fetched': pages_fetched
+        }, 200)
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error syncing fixture scores: {str(e)}")
+        print(f"Traceback: {error_details}")
+        return make_response({'error': str(e), 'type': type(e).__name__, 'details': error_details.split('\n')[-5:]}, 500)
+
+@app.route('/api/v1/predictions/check-results', methods=['POST'])
+def check_prediction_results():
+    """
+    Compare user predictions against actual fixture scores and determine Win/Draw/Loss.
+    Updates the game_result field in Game model.
+    """
+    try:
+        user_id = session.get('user_id')
+        
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        # Get all user's predictions (Games)
+        user_games = Game.query.filter_by(user_id=user_id).all()
+        
+        results_updated = 0
+        wins = 0
+        draws = 0
+        losses = 0
+        
+        for game in user_games:
+            # Find matching fixture
+            fixture = Fixture.query.filter_by(
+                fixture_home_team=game.home_team,
+                fixture_away_team=game.away_team
+            ).first()
+            
+            if not fixture or not fixture.is_completed:
+                # Fixture not found or not completed yet, skip
+                continue
+            
+            if fixture.actual_home_score is None or fixture.actual_away_score is None:
+                # No actual scores yet, skip
+                continue
+            
+            # Get predicted and actual scores
+            pred_home = game.home_team_score
+            pred_away = game.away_team_score
+            actual_home = fixture.actual_home_score
+            actual_away = fixture.actual_away_score
+            
+            # Determine result
+            result = None
+            
+            # Win: both scores match exactly
+            if pred_home == actual_home and pred_away == actual_away:
+                result = 'Win'
+                wins += 1
+            else:
+                # Determine predicted winner
+                if pred_home > pred_away:
+                    pred_winner = 'home'
+                elif pred_away > pred_home:
+                    pred_winner = 'away'
+                else:
+                    pred_winner = 'draw'
+                
+                # Determine actual winner
+                if actual_home > actual_away:
+                    actual_winner = 'home'
+                elif actual_away > actual_home:
+                    actual_winner = 'away'
+                else:
+                    actual_winner = 'draw'
+                
+                # Draw: predicted winner matches actual winner (but scores differ)
+                if pred_winner == actual_winner:
+                    result = 'Draw'
+                    draws += 1
+                else:
+                    # Loss: wrong winner or wrong scores
+                    result = 'Loss'
+                    losses += 1
+            
+            # Update game result if it changed
+            if game.game_result != result:
+                game.game_result = result
+                results_updated += 1
+        
+        db.session.commit()
+        
+        return make_response({
+            'message': 'Prediction results checked successfully',
+            'results_updated': results_updated,
+            'wins': wins,
+            'draws': draws,
+            'losses': losses,
+            'total_checked': len(user_games)
+        }, 200)
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error checking prediction results: {str(e)}")
+        print(f"Traceback: {error_details}")
+        return make_response({'error': str(e), 'type': type(e).__name__}, 500)
 
 class Games(Resource):
     def post(self):

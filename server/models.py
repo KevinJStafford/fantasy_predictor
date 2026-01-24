@@ -11,7 +11,7 @@ class User(db.Model, SerializerMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=False)
-    email = db.Column(db.String, nullable=False)
+    email = db.Column(db.String, nullable=True)
     _password_hash = db.Column(db.String)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -74,6 +74,10 @@ class Fixture(db.Model, SerializerMixin):
     fixture_date = db.Column(db.DateTime)
     fixture_home_team = db.Column(db.String)
     fixture_away_team = db.Column(db.String)
+    # Actual scores from completed matches
+    actual_home_score = db.Column(db.Integer, nullable=True)
+    actual_away_score = db.Column(db.Integer, nullable=True)
+    is_completed = db.Column(db.Boolean, default=False)
 
 
     def __repr__(self):
