@@ -38,6 +38,7 @@ git push origin main
 3. Configure the service:
    - **Name**: `fantasy-predictor-api`
    - **Environment**: `Python 3`
+   - **Python Version**: `3.11` (IMPORTANT: Select 3.11, not 3.13! psycopg2-binary doesn't support 3.13 yet)
    - **Region**: Same as database
    - **Branch**: `main` (or your default branch)
    - **Root Directory**: Leave empty (or `server` if you want)
