@@ -3,9 +3,10 @@ import os
 import warnings
 from urllib.parse import urlparse
 
-# Suppress SQLAlchemy 2.0 deprecation warnings
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='sqlalchemy')
-warnings.filterwarnings('ignore', message='.*Query.get.*', category=DeprecationWarning)
+# Suppress ALL SQLAlchemy deprecation warnings before importing SQLAlchemy
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*Query.get.*')
+warnings.filterwarnings('ignore', message='.*LegacyAPIWarning.*')
 
 # Remote library imports
 from flask import Flask

@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     pythonVersion: 3.11
-    buildCommand: pip install -r requirements.txt && cd server && flask db upgrade
+    buildCommand: PYTHONWARNINGS=ignore pip install -r requirements.txt && cd server && PYTHONWARNINGS=ignore flask db upgrade
     startCommand: cd server && gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: FLASK_APP

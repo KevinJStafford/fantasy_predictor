@@ -1,6 +1,6 @@
 flask==2.3.3
-flask-sqlalchemy==2.5.1
-sqlalchemy==1.4.53
+flask-sqlalchemy==3.1.1
+sqlalchemy==2.0.23
 flask-migrate==4.0.5
 sqlalchemy-serializer==1.4.1
 flask-restful==0.3.10

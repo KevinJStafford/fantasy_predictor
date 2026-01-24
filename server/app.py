@@ -6,9 +6,11 @@ import warnings
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone
 
-# Suppress SQLAlchemy deprecation warnings
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='sqlalchemy')
-warnings.filterwarnings('ignore', message='.*Query.get.*', category=DeprecationWarning)
+# Suppress SQLAlchemy deprecation warnings - set before any SQLAlchemy imports
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*Query.get.*')
+warnings.filterwarnings('ignore', message='.*LegacyAPIWarning.*')
 
 # Remote library imports
 from flask import request, make_response, session
