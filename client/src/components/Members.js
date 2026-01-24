@@ -18,7 +18,7 @@ function Members() {
     const [loadingPredictions, setLoadingPredictions] = useState(false)
 
     function getAvailableRounds() {
-        fetch('/api/v1/fixtures/rounds')
+        fetch(apiUrl('/api/v1/fixtures/rounds'))
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to fetch rounds')
@@ -194,7 +194,7 @@ function Members() {
                     variant="outlined" 
                     onClick={() => {
                         setSyncing(true)
-                        fetch('/api/v1/fixtures/sync-scores', {
+                        fetch(apiUrl('/api/v1/fixtures/sync-scores'), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -316,7 +316,7 @@ function Members() {
                                     onClick={() => {
                                         setLoadingPredictions(true)
                                         // Also trigger result check on backend
-                                        fetch('/api/v1/predictions/check-results', { method: 'POST' })
+                                        fetch(apiUrl('/api/v1/predictions/check-results'), { method: 'POST' })
                                             .then(res => res.json())
                                             .then(data => {
                                                 console.log('Check results response:', data)

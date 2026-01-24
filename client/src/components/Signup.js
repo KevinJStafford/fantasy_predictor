@@ -2,6 +2,7 @@ import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
 import {useHistory} from 'react-router-dom';
+import { apiUrl } from '../utils/api';
 
 import Navbar from './Navbar'
 
