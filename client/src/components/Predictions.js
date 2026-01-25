@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Card, CardContent, Typography, TextField, Button, Box, Grid, Alert } from "@mui/material"
+import { Card, CardContent, Typography, TextField, Button, Grid, Alert } from "@mui/material"
 import {useFormik} from 'formik';
 import { useState, useEffect } from 'react';
 import * as yup from 'yup';
@@ -111,6 +111,7 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
             formik.setFieldValue('home_team_score', '')
             formik.setFieldValue('away_team_score', '')
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingPrediction?.id, existingPrediction?.home_team_score, existingPrediction?.away_team_score])
 
     const formatKickoffLocal = (value) => {

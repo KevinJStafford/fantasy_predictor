@@ -4,12 +4,15 @@ import "./index.css";
 import { BrowserRouter } from "react-router-dom/";
 import ReactDOM from "react-dom"
 import { ChakraProvider } from '@chakra-ui/react'
+import ErrorBoundary from "./components/ErrorBoundary"
 
 ReactDOM.render(
-    <ChakraProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </ChakraProvider>,
+    <ErrorBoundary>
+      <ChakraProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ChakraProvider>
+    </ErrorBoundary>,
     document.getElementById("root")
   );

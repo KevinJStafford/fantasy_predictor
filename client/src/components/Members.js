@@ -2,12 +2,11 @@ import * as React from 'react'
 import Navbar from './Navbar'
 import Predictions from './Predictions'
 import {useEffect, useState} from 'react'
-import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Divider } from '@mui/material'
+import { Typography, Button, Box, Alert, Card, CardContent, Grid, Chip } from '@mui/material'
 import { apiUrl } from '../utils/api'
 
 
 function Members() {
-    const [fixtures, setFixtures] = useState([])
     const [filteredFixtures, setFilteredFixtures] = useState([])
     const [availableRounds, setAvailableRounds] = useState([])
     const [gameWeek, setGameWeek] = useState('')
@@ -53,12 +52,10 @@ function Members() {
                 const bd = b?.fixture_date ? new Date(b.fixture_date).getTime() : Number.POSITIVE_INFINITY
                 return ad - bd
             })
-            setFixtures(fixturesList)
             setFilteredFixtures(sorted)
         })
         .catch(error => {
             console.error('Error fetching fixtures:', error)
-            setFixtures([])
             setFilteredFixtures([])
         })
         .finally(() => {

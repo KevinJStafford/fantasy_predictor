@@ -5,6 +5,7 @@ import {useHistory} from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 
 import Navbar from './Navbar'
+import ErrorBoundary from './ErrorBoundary'
 
 function Signup({setUser}) {
     const history = useHistory();
@@ -50,7 +51,12 @@ function Signup({setUser}) {
 
     return(
         <main>
-            <Navbar />
+            <div style={{ padding: '20px', backgroundColor: '#f5f5f5' }}>
+                <h1>Sign Up</h1>
+            </div>
+            <ErrorBoundary>
+                <Navbar />
+            </ErrorBoundary>
             <div>
             {/* {formik.errors} */}
         <hr></hr>
