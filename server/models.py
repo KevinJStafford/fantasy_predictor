@@ -93,6 +93,8 @@ class Fixture(db.Model, SerializerMixin):
 class League(db.Model, SerializerMixin):
     __tablename__ = 'leagues'
 
+    serialize_rules = ('-members.leagues', '-members._password_hash',)  # Prevent circular serialization
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
     invite_code = db.Column(db.String, unique=True, nullable=False)
@@ -102,6 +104,33 @@ class League(db.Model, SerializerMixin):
 
     # Relationships
     members = db.relationship('User', secondary=user_league, back_populates='leagues')
+
+    def to_dict(self, rules=None):
+        """Custom to_dict to prevent circular references"""
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'invite_code': self.invite_code,
+            'created_by': self.created_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        
+        # Include members but without their leagues to prevent recursion
+        if hasattr(self, 'members') and self.members:
+            data['members'] = [
+                {
+                    'id': member.id,
+                    'username': member.username,
+                    'email': member.email,
+                    'created_at': member.created_at.isoformat() if member.created_at else None,
+                }
+                for member in self.members
+            ]
+        else:
+            data['members'] = []
+        
+        return data
 
     def __repr__(self):
         return f'<League {self.id}: {self.name}>'
