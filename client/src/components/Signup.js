@@ -6,11 +6,8 @@ import {useHistory} from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 
 import Navbar from './Navbar'
-import ErrorBoundary from './ErrorBoundary'
 
 function Signup({setUser}) {
-    console.log('=== SIGNUP COMPONENT RENDERING ===');
-    console.log('setUser prop:', typeof setUser);
     const history = useHistory();
 
     const signupSchema = yup.object().shape({
@@ -52,29 +49,10 @@ function Signup({setUser}) {
         }
     })
 
-    console.log('Signup component returning JSX, apiUrl base:', apiUrl(''));
     return(
-        <main style={{ minHeight: '100vh', backgroundColor: '#ffffff', position: 'relative', zIndex: 1 }}>
-            <ErrorBoundary>
-                <Navbar />
-            </ErrorBoundary>
-            {/* TEST: This should be visible if component renders */}
-            <div style={{ 
-                padding: '40px', 
-                backgroundColor: 'red', 
-                color: 'white', 
-                fontSize: '32px', 
-                fontWeight: 'bold',
-                textAlign: 'center',
-                margin: '20px',
-                border: '5px solid black'
-            }}>
-                TEST: SIGNUP PAGE IS RENDERING
-            </div>
-            <div style={{ padding: '20px', backgroundColor: '#f5f5f5', margin: '20px' }}>
-                <h1 style={{ color: '#000000', fontSize: '24px', fontWeight: 'bold' }}>Sign Up</h1>
-            </div>
-            <div style={{ padding: '20px', backgroundColor: '#ffffff' }}>
+        <main>
+            <Navbar />
+            <div style={{ padding: '20px' }}>
             {/* {formik.errors} */}
         <hr></hr>
         <Container maxWidth="xs">
