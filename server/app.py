@@ -1269,7 +1269,17 @@ def create_league():
         if not league_name:
             return make_response({'error': 'League name is required'}, 400)
         
-        league = League(name=league_name, created_by=user_id)
+        # Generate unique invite code (6 uppercase alphanumeric characters)
+        import random
+        import string
+        while True:
+            invite_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            # Check if code already exists
+            existing = League.query.filter_by(invite_code=invite_code).first()
+            if not existing:
+                break
+        
+        league = League(name=league_name, invite_code=invite_code, created_by=user_id)
         db.session.add(league)
         db.session.flush()  # Get the league ID
         
@@ -1288,7 +1298,7 @@ def create_league():
 
 @app.route('/api/v1/leagues/<int:league_id>/join', methods=['POST'])
 def join_league(league_id):
-    """Join a league"""
+    """Join a league by ID"""
     try:
         user_id = get_current_user_id()
         if not user_id:
@@ -1309,6 +1319,39 @@ def join_league(league_id):
     except Exception as e:
         db.session.rollback()
         print(f"Error joining league: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+@app.route('/api/v1/leagues/join-by-code', methods=['POST'])
+def join_league_by_code():
+    """Join a league using an invite code"""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        data = request.get_json()
+        invite_code = data.get('invite_code', '').strip().upper()
+        
+        if not invite_code:
+            return make_response({'error': 'Invite code is required'}, 400)
+        
+        league = League.query.filter_by(invite_code=invite_code).first()
+        if not league:
+            return make_response({'error': 'Invalid invite code'}, 404)
+        
+        user = User.query.get(user_id)
+        if user in league.members:
+            return make_response({'error': 'You are already a member of this league'}, 400)
+        
+        league.members.append(user)
+        db.session.commit()
+        
+        return make_response({'league': league.to_dict()}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error joining league by code: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
