@@ -2,11 +2,17 @@ import * as React from 'react'
 import Navbar from './Navbar'
 import Predictions from './Predictions'
 import {useEffect, useState} from 'react'
-import { Typography, Button, Box, Alert, Card, CardContent, Grid, Chip } from '@mui/material'
+import { useLocation, useHistory } from 'react-router-dom'
+import { Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material'
 import { apiUrl, authenticatedFetch } from '../utils/api'
 
 
 function Members() {
+    const location = useLocation()
+    const history = useHistory()
+    const [leagueId, setLeagueId] = useState(null)
+    const [leaderboard, setLeaderboard] = useState([])
+    const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
     const [filteredFixtures, setFilteredFixtures] = useState([])
     const [availableRounds, setAvailableRounds] = useState([])
     const [gameWeek, setGameWeek] = useState('')
@@ -15,6 +21,25 @@ function Members() {
     const [loadingFixtures, setLoadingFixtures] = useState(false)
     const [predictions, setPredictions] = useState([])
     const [loadingPredictions, setLoadingPredictions] = useState(false)
+
+    // Get league_id from URL query params
+    useEffect(() => {
+        const params = new URLSearchParams(location.search)
+        const leagueParam = params.get('league')
+        if (leagueParam) {
+            setLeagueId(parseInt(leagueParam))
+        } else {
+            // If no league_id, redirect to leagues page
+            history.push('/leagues')
+        }
+    }, [location.search, history])
+
+    // Fetch leaderboard when league_id is set
+    useEffect(() => {
+        if (leagueId) {
+            fetchLeaderboard()
+        }
+    }, [leagueId])
 
     function getAvailableRounds() {
         fetch(apiUrl('/api/v1/fixtures/rounds'))
@@ -154,6 +179,28 @@ function Members() {
         })
     }
 
+    function fetchLeaderboard() {
+        if (!leagueId) return
+        setLoadingLeaderboard(true)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/leaderboard`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch leaderboard')
+                }
+                return response.json()
+            })
+            .then(data => {
+                setLeaderboard(data.leaderboard || [])
+            })
+            .catch(error => {
+                console.error('Error fetching leaderboard:', error)
+                setLeaderboard([])
+            })
+            .finally(() => {
+                setLoadingLeaderboard(false)
+            })
+    }
+
     // Load available rounds and predictions on mount
     useEffect(() => {
         getAvailableRounds()
@@ -178,6 +225,13 @@ function Members() {
         <Navbar />
         <div>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Button 
+                variant="outlined" 
+                onClick={() => history.push('/leagues')}
+                sx={{ mr: 2 }}
+            >
+                ← Back to Leagues
+            </Button>
             <Typography variant="h5" component="h2"><span>Select Game Week:</span></Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button 
@@ -207,6 +261,9 @@ function Members() {
                                 .then(res => res.json())
                                 .then((resultData) => {
                                     getPredictions() // Refresh results
+                                    if (leagueId) {
+                                        fetchLeaderboard() // Refresh leaderboard
+                                    }
                                     const details = [
                                         `Updated: ${resultData.results_updated || 0}`,
                                         `W: ${resultData.wins || 0}, D: ${resultData.draws || 0}, L: ${resultData.losses || 0}`,
@@ -285,7 +342,12 @@ function Members() {
                                             key={fixture.id} 
                                             fixture={fixture}
                                             existingPrediction={matchingPrediction}
-                                            onPredictionSaved={getPredictions}
+                                            onPredictionSaved={() => {
+                                                getPredictions()
+                                                if (leagueId) {
+                                                    fetchLeaderboard()
+                                                }
+                                            }}
                                         />
                                     )
                                 })}
@@ -297,9 +359,57 @@ function Members() {
                         )}
                     </Grid>
 
-                    {/* Right side: Results */}
+                    {/* Right side: Leaderboard and Results */}
                     <Grid item xs={12} md={5}>
                         <Box sx={{ position: 'sticky', top: 20 }}>
+                            {/* Leaderboard Table */}
+                            <Box sx={{ mb: 4 }}>
+                                <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
+                                    League Leaderboard
+                                </Typography>
+                                {loadingLeaderboard ? (
+                                    <Typography variant="body2">Loading leaderboard...</Typography>
+                                ) : leaderboard.length > 0 ? (
+                                    <TableContainer component={Paper}>
+                                        <Table size="small">
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell><strong>Rank</strong></TableCell>
+                                                    <TableCell><strong>Player</strong></TableCell>
+                                                    <TableCell align="right"><strong>Points</strong></TableCell>
+                                                    <TableCell align="right"><strong>W</strong></TableCell>
+                                                    <TableCell align="right"><strong>D</strong></TableCell>
+                                                    <TableCell align="right"><strong>L</strong></TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {leaderboard.map((player, index) => (
+                                                    <TableRow 
+                                                        key={player.user_id}
+                                                        sx={{ 
+                                                            '&:nth-of-type(odd)': { backgroundColor: 'action.hover' },
+                                                            backgroundColor: index === 0 ? 'success.light' : 'inherit'
+                                                        }}
+                                                    >
+                                                        <TableCell><strong>#{index + 1}</strong></TableCell>
+                                                        <TableCell>{player.username}</TableCell>
+                                                        <TableCell align="right"><strong>{player.points}</strong></TableCell>
+                                                        <TableCell align="right">{player.wins}</TableCell>
+                                                        <TableCell align="right">{player.draws}</TableCell>
+                                                        <TableCell align="right">{player.losses}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                ) : (
+                                    <Typography variant="body2" color="text.secondary">
+                                        No leaderboard data available yet.
+                                    </Typography>
+                                )}
+                            </Box>
+
+                            {/* Results Section */}
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Typography variant="h5" component="h2">
                                     Results
@@ -315,6 +425,9 @@ function Members() {
                                             .then(data => {
                                                 console.log('Check results response:', data)
                                                 getPredictions() // Refresh after checking
+                                                if (leagueId) {
+                                                    fetchLeaderboard() // Refresh leaderboard
+                                                }
                                                 if (data.fixtures_not_found > 0 || data.fixtures_no_scores > 0) {
                                                     setSyncMessage({
                                                         type: 'warning',

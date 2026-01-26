@@ -4,6 +4,13 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from config import db, bcrypt
 
 # Models go here!
+# Association table for many-to-many relationship between Users and Leagues
+user_league = db.Table('user_league',
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+    db.Column('league_id', db.Integer, db.ForeignKey('leagues.id'), primary_key=True),
+    db.Column('joined_at', db.DateTime, server_default=db.func.now())
+)
+
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
 
@@ -19,6 +26,7 @@ class User(db.Model, SerializerMixin):
     # Relationships
     # predictions = db.relationship('Prediction', back_populates='user', cascade='all, delete-orphan')
     # games = association_proxy('predictions', 'game')
+    leagues = db.relationship('League', secondary=user_league, back_populates='members')
 
     @property
     def password_hash(self):
@@ -79,6 +87,20 @@ class Fixture(db.Model, SerializerMixin):
     actual_away_score = db.Column(db.Integer, nullable=True)
     is_completed = db.Column(db.Boolean, default=False)
 
+    def __repr__(self):
+        return f'<Fixture {self.id}: {self.fixture_home_team} vs {self.fixture_away_team}>'
+
+class League(db.Model, SerializerMixin):
+    __tablename__ = 'leagues'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    # Relationships
+    members = db.relationship('User', secondary=user_league, back_populates='leagues')
 
     def __repr__(self):
-        return f'<Game {self.id}: {self.game_week_name}>'
+        return f'<League {self.id}: {self.name}>'

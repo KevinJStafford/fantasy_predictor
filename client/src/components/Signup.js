@@ -44,7 +44,7 @@ function Signup({setUser}) {
                             saveToken(token)
                         }
                         setUser(user)
-                        history.push('/player')
+                        history.push('/leagues')
                     })
                 } else {
                     console.log('errors? handle error')

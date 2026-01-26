@@ -36,7 +36,7 @@ function Login({setUser}) {
                             saveToken(token)
                         }
                         setUser(user)
-                        history.push('/player')
+                        history.push('/leagues')
                     })
                 } else {
                     resp.json().then((data) => {

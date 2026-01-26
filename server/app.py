@@ -13,7 +13,7 @@ from flask_restful import Resource
 # Local imports
 from config import app, db, api
 # Add your model imports
-from models import User, Game, Prediction, Fixture
+from models import User, Game, Prediction, Fixture, League
 
 # JWT token helper functions
 def generate_token(user_id):
@@ -1235,6 +1235,132 @@ def login():
 @app.route('/')
 def index():
     return '<h1>Project Server</h1>'
+
+@app.route('/api/v1/leagues', methods=['GET'])
+def get_user_leagues():
+    """Get all leagues the current user is a member of"""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        user = User.query.get(user_id)
+        if not user:
+            return make_response({'error': 'User not found'}, 404)
+        
+        leagues = [league.to_dict() for league in user.leagues]
+        return make_response({'leagues': leagues}, 200)
+    except Exception as e:
+        print(f"Error fetching user leagues: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+@app.route('/api/v1/leagues', methods=['POST'])
+def create_league():
+    """Create a new league"""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        data = request.get_json()
+        league_name = data.get('name')
+        if not league_name:
+            return make_response({'error': 'League name is required'}, 400)
+        
+        league = League(name=league_name, created_by=user_id)
+        db.session.add(league)
+        db.session.flush()  # Get the league ID
+        
+        # Add creator as a member
+        user = User.query.get(user_id)
+        league.members.append(user)
+        db.session.commit()
+        
+        return make_response({'league': league.to_dict()}, 201)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating league: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+@app.route('/api/v1/leagues/<int:league_id>/join', methods=['POST'])
+def join_league(league_id):
+    """Join a league"""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        
+        user = User.query.get(user_id)
+        if user in league.members:
+            return make_response({'error': 'User is already a member of this league'}, 400)
+        
+        league.members.append(user)
+        db.session.commit()
+        
+        return make_response({'league': league.to_dict()}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error joining league: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+@app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
+def get_league_leaderboard(league_id):
+    """Get leaderboard for a league - players ordered by points"""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        
+        # Check if user is a member
+        user = User.query.get(user_id)
+        if user not in league.members:
+            return make_response({'error': 'User is not a member of this league'}, 403)
+        
+        # Calculate points for each member
+        leaderboard = []
+        for member in league.members:
+            # Get all games for this user
+            games = Game.query.filter_by(user_id=member.id).all()
+            
+            # Calculate points: Win=3, Draw=1, Loss=0
+            wins = sum(1 for g in games if g.game_result == 'Win')
+            draws = sum(1 for g in games if g.game_result == 'Draw')
+            losses = sum(1 for g in games if g.game_result == 'Loss')
+            points = (wins * 3) + (draws * 1) + (losses * 0)
+            
+            leaderboard.append({
+                'user_id': member.id,
+                'username': member.username,
+                'wins': wins,
+                'draws': draws,
+                'losses': losses,
+                'points': points,
+                'total_games': len(games)
+            })
+        
+        # Sort by points (descending), then by wins, then by draws
+        leaderboard.sort(key=lambda x: (x['points'], x['wins'], x['draws']), reverse=True)
+        
+        return make_response({'leaderboard': leaderboard}, 200)
+    except Exception as e:
+        print(f"Error fetching leaderboard: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
 
 @app.route('/api/v1/migrate', methods=['POST'])
 def run_migrations():
