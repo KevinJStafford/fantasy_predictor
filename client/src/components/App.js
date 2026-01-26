@@ -43,7 +43,6 @@ function App() {
         {/* <Results /> */}
       </Route>
       </Switch>
-      </div>
     </main>
   );
 }
