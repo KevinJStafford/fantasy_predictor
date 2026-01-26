@@ -10,20 +10,26 @@ import Members from "./Members"
 
 
 function App() {
-  console.log('App component rendering, current path:', window.location.pathname);
+  console.log('=== APP COMPONENT RENDERING ===');
+  console.log('Current pathname:', window.location.pathname);
   // eslint-disable-next-line no-unused-vars
   const [user, setUser] = useState(null)
 
-
-  console.log('App rendering, pathname:', window.location.pathname);
+  // Test: render something before Switch to verify App is rendering
   return (
     <main>
+      <div style={{ padding: '20px', backgroundColor: 'yellow', fontSize: '20px' }}>
+        APP IS RENDERING - Path: {window.location.pathname}
+      </div>
       <Switch>
         <Route exact path="/">
           <Navbar />
           <LandingGrid />
       </Route>
-      <Route exact path="/users">
+      <Route path="/users">
+        <div style={{ padding: '20px', backgroundColor: 'orange', fontSize: '20px' }}>
+          ROUTE /users MATCHED!
+        </div>
         <TestSignup />
         <Signup setUser={setUser} />
       </Route>
@@ -37,6 +43,7 @@ function App() {
         {/* <Results /> */}
       </Route>
       </Switch>
+      </div>
     </main>
   );
 }
