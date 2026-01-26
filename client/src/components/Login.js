@@ -1,11 +1,13 @@
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
+import {useHistory} from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 
 import Navbar from './Navbar'
 
 function Login({setUser}) {
+    const history = useHistory();
     const loginSchema = yup.object().shape({
         username: yup.string()
         .required('Username is Required!'),
@@ -29,11 +31,20 @@ function Login({setUser}) {
             }).then((resp) => {
                 if (resp.ok) {
                     resp.json().then(({user}) => {
-                    setUser(user)
+                        setUser(user)
+                        history.push('/player')
                     })
                 } else {
-                    console.log('errors? handle error')
+                    resp.json().then((data) => {
+                        console.error('Login error:', data.error || 'Login failed')
+                        alert(data.error || 'Login failed. Please check your username and password.')
+                    }).catch(() => {
+                        alert('Login failed. Please try again.')
+                    })
                 }
+            }).catch((error) => {
+                console.error('Login request error:', error)
+                alert('Failed to connect to server. Please try again.')
             })
         }
     })
