@@ -63,5 +63,9 @@ if cors_origins != '*':
 else:
     origins = '*'
 
-CORS(app, origins=origins, supports_credentials=True)
+CORS(app, 
+     origins=origins, 
+     supports_credentials=True,
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'])
 
