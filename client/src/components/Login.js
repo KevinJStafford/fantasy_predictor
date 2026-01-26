@@ -3,6 +3,7 @@ import {useFormik} from 'formik';
 import * as yup from 'yup';
 import {useHistory} from 'react-router-dom';
 import { apiUrl } from '../utils/api';
+import { saveToken } from '../utils/auth';
 
 import Navbar from './Navbar'
 
@@ -30,7 +31,10 @@ function Login({setUser}) {
                 body: JSON.stringify(values)
             }).then((resp) => {
                 if (resp.ok) {
-                    resp.json().then(({user}) => {
+                    resp.json().then(({user, token}) => {
+                        if (token) {
+                            saveToken(token)
+                        }
                         setUser(user)
                         history.push('/player')
                     })

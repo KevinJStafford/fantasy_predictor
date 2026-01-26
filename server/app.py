@@ -4,6 +4,7 @@
 import os
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone
+import jwt
 
 # Remote library imports
 from flask import request, make_response, session
@@ -13,6 +14,40 @@ from flask_restful import Resource
 from config import app, db, api
 # Add your model imports
 from models import User, Game, Prediction, Fixture
+
+# JWT token helper functions
+def generate_token(user_id):
+    """Generate a JWT token for a user"""
+    payload = {
+        'user_id': user_id,
+        'exp': datetime.now(timezone.utc) + timedelta(days=7)  # Token expires in 7 days
+    }
+    return jwt.encode(payload, app.secret_key, algorithm='HS256')
+
+def get_user_id_from_token():
+    """Extract user_id from JWT token in Authorization header"""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    
+    try:
+        # Support both "Bearer <token>" and just "<token>"
+        token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else auth_header
+        payload = jwt.decode(token, app.secret_key, algorithms=['HS256'])
+        return payload.get('user_id')
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+def get_current_user_id():
+    """Get current user ID from token or session (for backward compatibility)"""
+    # Try token first (for cross-domain auth)
+    user_id = get_user_id_from_token()
+    if user_id:
+        return user_id
+    # Fall back to session (for same-domain auth)
+    return session.get('user_id')
 
 # Note: Renamed Predictions Resource class to avoid conflict with model
 # The endpoint /api/v1/predictions uses the PredictionsResource class below
@@ -41,7 +76,12 @@ class Users(Resource):
             db.session.add(user)
             db.session.commit()
             session['user_id'] = user.id
-            return make_response({'user': user.to_dict()}, 201)
+            # Generate JWT token for cross-domain auth
+            token = generate_token(user.id)
+            return make_response({
+                'user': user.to_dict(),
+                'token': token
+            }, 201)
         except Exception as e:
             db.session.rollback()
             # Print error to console for debugging
@@ -542,7 +582,7 @@ class PredictionsResource(Resource):
     def get(self):
         """Get all predictions for the current user with their results"""
         try:
-            user_id = session.get('user_id')
+            user_id = get_current_user_id()
             
             if not user_id:
                 return make_response({'error': 'User not authenticated'}, 401)
@@ -615,7 +655,7 @@ class PredictionsResource(Resource):
         """Create or update a user's prediction for a fixture"""
         try:
             data = request.get_json()
-            user_id = session.get('user_id')
+            user_id = get_current_user_id()
             
             if not user_id:
                 return make_response({'error': 'User not authenticated'}, 401)
@@ -1161,7 +1201,7 @@ class Games(Resource):
 @app.route('/api/v1/authorized')
 def authorized():
     try:
-        user = User.query.filter_by(id=session.get('user_id')).first()
+        user = User.query.filter_by(id=get_current_user_id()).first()
         return make_response(user.to_dict(), 200)
     except:
         return make_response({"error": "User not found"}, 404)
@@ -1176,12 +1216,19 @@ def login():
     data = request.get_json()
     try:
         user = User.query.filter_by(username=data['username']).first()
-        if user.authenticate(data['password']):
+        if user and user.authenticate(data['password']):
+            # Set session for backward compatibility
             session['user_id'] = user.id
-            return make_response({'user': user.to_dict()}, 200)
+            # Generate JWT token for cross-domain auth
+            token = generate_token(user.id)
+            return make_response({
+                'user': user.to_dict(),
+                'token': token
+            }, 200)
         else:
             return make_response({'error': 'Password incorrect'}, 401)
-    except:
+    except Exception as e:
+        print(f"Login error: {str(e)}")
         return make_response({'error': 'username incorrect'}, 401)
     
 

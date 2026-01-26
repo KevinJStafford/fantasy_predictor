@@ -2,6 +2,8 @@
 // In development, uses proxy from package.json
 // In production, uses REACT_APP_API_URL environment variable
 
+import { getAuthHeaders } from './auth';
+
 const getApiUrl = () => {
   // Check if we're in production and have an API URL set
   if (process.env.NODE_ENV === 'production' && process.env.REACT_APP_API_URL) {
@@ -19,4 +21,19 @@ export const apiUrl = (path) => {
   // Ensure path starts with /
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${base}${cleanPath}`;
+};
+
+// Helper function to make authenticated API requests
+export const authenticatedFetch = (path, options = {}) => {
+  const url = apiUrl(path);
+  const headers = {
+    ...getAuthHeaders(),
+    ...(options.headers || {})
+  };
+  
+  return fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include' // Still include cookies for backward compatibility
+  });
 };

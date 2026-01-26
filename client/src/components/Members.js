@@ -3,7 +3,7 @@ import Navbar from './Navbar'
 import Predictions from './Predictions'
 import {useEffect, useState} from 'react'
 import { Typography, Button, Box, Alert, Card, CardContent, Grid, Chip } from '@mui/material'
-import { apiUrl } from '../utils/api'
+import { apiUrl, authenticatedFetch } from '../utils/api'
 
 
 function Members() {
@@ -129,7 +129,7 @@ function Members() {
 
     function getPredictions() {
         setLoadingPredictions(true)
-        fetch(apiUrl('/api/v1/predictions'))
+        authenticatedFetch('/api/v1/predictions')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to fetch predictions')
@@ -191,11 +191,8 @@ function Members() {
                     variant="outlined" 
                     onClick={() => {
                         setSyncing(true)
-                        fetch(apiUrl('/api/v1/fixtures/sync-scores'), {
+                        authenticatedFetch('/api/v1/fixtures/sync-scores', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
                             body: JSON.stringify({
                                 api_url: 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
                             })
@@ -206,7 +203,7 @@ function Members() {
                                 throw new Error(data.error || 'Failed to sync scores')
                             }
                             // After syncing scores, check results
-                                return fetch(apiUrl('/api/v1/predictions/check-results'), { method: 'POST' })
+                                return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
                                 .then(res => res.json())
                                 .then((resultData) => {
                                     getPredictions() // Refresh results

@@ -3,7 +3,7 @@ import { Card, CardContent, Typography, TextField, Button, Grid, Alert } from "@
 import {useFormik} from 'formik';
 import { useState, useEffect } from 'react';
 import * as yup from 'yup';
-import { apiUrl } from '../utils/api';
+import { authenticatedFetch } from '../utils/api';
 
 // Helper function to parse UTC dates
 const parseUtcDate = (value) => {
@@ -64,11 +64,8 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
             setSaving(true)
             setMessage(null)
             
-            fetch(apiUrl('/api/v1/predictions'), {
+            authenticatedFetch('/api/v1/predictions', {
                 method: 'POST',
-                headers: {
-                    "Content-Type": 'application/json'
-                },
                 body: JSON.stringify({
                     fixture_id: id,
                     home_team_score: parseInt(values.home_team_score),
