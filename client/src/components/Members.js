@@ -314,15 +314,15 @@ function Members() {
             </select>
         </Box>
 
-        {gameWeek && (
-            <>
-                <Typography variant="h4" component="h2" sx={{ mb: 2 }}>
-                    <span>Fixtures for Week {gameWeek}</span>
-                </Typography>
-                
-                <Grid container spacing={3}>
-                    {/* Left side: Predictions */}
-                    <Grid item xs={12} md={7}>
+        <Grid container spacing={3}>
+            {/* Left side: Predictions and Results (only when game week is selected) */}
+            <Grid item xs={12} md={7}>
+                {gameWeek ? (
+                    <>
+                        <Typography variant="h4" component="h2" sx={{ mb: 2 }}>
+                            <span>Fixtures for Week {gameWeek}</span>
+                        </Typography>
+                        
                         {loadingFixtures ? (
                             <Typography variant="body1">Loading fixtures...</Typography>
                         ) : filteredFixtures.length > 0 ? (
@@ -357,62 +357,12 @@ function Members() {
                                 No fixtures found for week {gameWeek}. Please sync fixtures first.
                             </Typography>
                         )}
-                    </Grid>
 
-                    {/* Right side: Leaderboard and Results */}
-                    <Grid item xs={12} md={5}>
-                        <Box sx={{ position: 'sticky', top: 20 }}>
-                            {/* Leaderboard Table */}
-                            <Box sx={{ mb: 4 }}>
-                                <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
-                                    League Leaderboard
-                                </Typography>
-                                {loadingLeaderboard ? (
-                                    <Typography variant="body2">Loading leaderboard...</Typography>
-                                ) : leaderboard.length > 0 ? (
-                                    <TableContainer component={Paper}>
-                                        <Table size="small">
-                                            <TableHead>
-                                                <TableRow>
-                                                    <TableCell><strong>Rank</strong></TableCell>
-                                                    <TableCell><strong>Player</strong></TableCell>
-                                                    <TableCell align="right"><strong>Points</strong></TableCell>
-                                                    <TableCell align="right"><strong>W</strong></TableCell>
-                                                    <TableCell align="right"><strong>D</strong></TableCell>
-                                                    <TableCell align="right"><strong>L</strong></TableCell>
-                                                </TableRow>
-                                            </TableHead>
-                                            <TableBody>
-                                                {leaderboard.map((player, index) => (
-                                                    <TableRow 
-                                                        key={player.user_id}
-                                                        sx={{ 
-                                                            '&:nth-of-type(odd)': { backgroundColor: 'action.hover' },
-                                                            backgroundColor: index === 0 ? 'success.light' : 'inherit'
-                                                        }}
-                                                    >
-                                                        <TableCell><strong>#{index + 1}</strong></TableCell>
-                                                        <TableCell>{player.username}</TableCell>
-                                                        <TableCell align="right"><strong>{player.points}</strong></TableCell>
-                                                        <TableCell align="right">{player.wins}</TableCell>
-                                                        <TableCell align="right">{player.draws}</TableCell>
-                                                        <TableCell align="right">{player.losses}</TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </TableContainer>
-                                ) : (
-                                    <Typography variant="body2" color="text.secondary">
-                                        No leaderboard data available yet.
-                                    </Typography>
-                                )}
-                            </Box>
-
-                            {/* Results Section */}
+                        {/* Results Section for Selected Week */}
+                        <Box sx={{ mt: 4 }}>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                                 <Typography variant="h5" component="h2">
-                                    Results
+                                    Results - Week {gameWeek}
                                 </Typography>
                                 <Button 
                                     variant="outlined" 
@@ -453,6 +403,7 @@ function Members() {
                                 <Typography variant="body2">Loading results...</Typography>
                             ) : (() => {
                                 // Filter to only completed fixtures with predictions for the selected game week
+                                const selectedRound = parseInt(gameWeek)
                                 const completedPredictions = predictions
                                     .filter(p => {
                                         // Must have a fixture
@@ -465,15 +416,9 @@ function Members() {
                                             return false
                                         }
                                         
-                                        // Must match the selected game week (if one is selected)
-                                        if (gameWeek && gameWeek !== '' && gameWeek !== 'all') {
-                                            const selectedRound = parseInt(gameWeek)
-                                            const fixtureRound = p.fixture.round
-                                            return fixtureRound === selectedRound
-                                        }
-                                        
-                                        // If no game week selected, don't show any results
-                                        return false
+                                        // Must match the selected game week
+                                        const fixtureRound = p.fixture.round
+                                        return fixtureRound === selectedRound
                                     })
                                     .sort((a, b) => {
                                         // Sort chronologically by fixture date (oldest first)
@@ -485,7 +430,7 @@ function Members() {
                                 if (completedPredictions.length === 0) {
                                     return (
                                         <Typography variant="body2" sx={{ mt: 2 }}>
-                                            No completed predictions yet.
+                                            No completed predictions for this week yet.
                                         </Typography>
                                     )
                                 }
@@ -515,7 +460,7 @@ function Members() {
                                             />
                                         </Box>
 
-                                        <Box sx={{ maxHeight: '70vh', overflowY: 'auto' }}>
+                                        <Box sx={{ maxHeight: '50vh', overflowY: 'auto' }}>
                                             {completedPredictions.map((prediction) => {
                                                 const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
                                                 
@@ -560,16 +505,69 @@ function Members() {
                                 )
                             })()}
                         </Box>
-                    </Grid>
-                </Grid>
-            </>
-        )}
-        
-        {!gameWeek && (
-            <Typography variant="body1" sx={{ mt: 2 }}>
-                Please select a game week to view and make predictions for fixtures.
-            </Typography>
-        )}
+                    </>
+                ) : (
+                    <Typography variant="body1" sx={{ mt: 2 }}>
+                        Please select a game week to view and make predictions for fixtures.
+                    </Typography>
+                )}
+            </Grid>
+
+            {/* Right side: Leaderboard (always visible) */}
+            <Grid item xs={12} md={5}>
+                <Box sx={{ position: 'sticky', top: 20 }}>
+                    {/* Leaderboard Table */}
+                    <Box sx={{ mb: 4 }}>
+                        <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
+                            League Leaderboard
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            All game weeks (1-38)
+                        </Typography>
+                        {loadingLeaderboard ? (
+                            <Typography variant="body2">Loading leaderboard...</Typography>
+                        ) : leaderboard.length > 0 ? (
+                            <TableContainer component={Paper}>
+                                <Table size="small">
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell><strong>Rank</strong></TableCell>
+                                            <TableCell><strong>Player</strong></TableCell>
+                                            <TableCell align="right"><strong>Points</strong></TableCell>
+                                            <TableCell align="right"><strong>W</strong></TableCell>
+                                            <TableCell align="right"><strong>D</strong></TableCell>
+                                            <TableCell align="right"><strong>L</strong></TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {leaderboard.map((player, index) => (
+                                            <TableRow 
+                                                key={player.user_id}
+                                                sx={{ 
+                                                    '&:nth-of-type(odd)': { backgroundColor: 'action.hover' },
+                                                    backgroundColor: index === 0 ? 'success.light' : 'inherit'
+                                                }}
+                                            >
+                                                <TableCell><strong>#{index + 1}</strong></TableCell>
+                                                <TableCell>{player.username}</TableCell>
+                                                <TableCell align="right"><strong>{player.points}</strong></TableCell>
+                                                <TableCell align="right">{player.wins}</TableCell>
+                                                <TableCell align="right">{player.draws}</TableCell>
+                                                <TableCell align="right">{player.losses}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        ) : (
+                            <Typography variant="body2" color="text.secondary">
+                                No leaderboard data available yet.
+                            </Typography>
+                        )}
+                    </Box>
+                </Box>
+            </Grid>
+        </Grid>
         </div>
         </>
       );
