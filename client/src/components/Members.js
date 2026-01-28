@@ -26,11 +26,11 @@ function Members() {
     useEffect(() => {
         const params = new URLSearchParams(location.search)
         const leagueParam = params.get('league')
-        if (leagueParam) {
-            setLeagueId(parseInt(leagueParam))
+        if (leagueParam && !Number.isNaN(parseInt(leagueParam, 10))) {
+            setLeagueId(parseInt(leagueParam, 10))
         } else {
-            // If no league_id, redirect to leagues page
-            history.push('/leagues')
+            // Don't hard-redirect on refresh; render a fallback UI instead.
+            setLeagueId(null)
         }
     }, [location.search, history])
 
@@ -314,6 +314,17 @@ function Members() {
             </select>
         </Box>
 
+        {!leagueId && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+                Missing league selection. Please go back to Leagues and pick a league.
+                <Box sx={{ mt: 1 }}>
+                    <Button variant="outlined" size="small" onClick={() => history.push('/leagues')}>
+                        Go to Leagues
+                    </Button>
+                </Box>
+            </Alert>
+        )}
+
         <Grid container spacing={3}>
             {/* Left side: Predictions and Results (only when game week is selected) */}
             <Grid item xs={12} md={7}>
@@ -370,7 +381,7 @@ function Members() {
                                     onClick={() => {
                                         setLoadingPredictions(true)
                                         // Also trigger result check on backend
-                                        fetch(apiUrl('/api/v1/predictions/check-results'), { method: 'POST' })
+                                        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
                                             .then(res => res.json())
                                             .then(data => {
                                                 console.log('Check results response:', data)
