@@ -23,13 +23,13 @@ services:
       - key: CORS_ORIGINS
         sync: false
 
-  # Frontend Static Site
+  # Frontend: Node web service that serves build with SPA fallback (fixes black page on refresh)
   - type: web
     name: fantasy-predictor-frontend
     env: node
     plan: free
     buildCommand: cd client && npm install && npm run build
-    staticPublishPath: ./client/build
+    startCommand: cd client && npm run serve
     envVars:
       - key: REACT_APP_API_URL
         sync: false
