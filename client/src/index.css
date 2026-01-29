@@ -5,6 +5,15 @@
   --text: hsla(0, 0%, 100%, 0.88);
 }
 
+body {
+  margin: 0;
+  background: #f5f5f5;
+}
+
+#root {
+  min-height: 100vh;
+}
+
 .nav_logo {
   justify-self: left;
 }
