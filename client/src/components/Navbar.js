@@ -3,16 +3,16 @@ import Avatar from '@mui/material/Avatar';
 import { Box, AppBar, Toolbar } from '@mui/material';
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
 import { yellow } from '@mui/material/colors';
-import typefaceLogoNew from '../../images/typeface_logo_new.png';
 
 function Navbar() {
+    const logoUrl = (process.env.PUBLIC_URL || '') + '/typeface_logo_new.png';
     return (
         <AppBar position="static" sx={{ backgroundColor: '#fff', boxShadow: 1 }}>
             <Toolbar sx={{ justifyContent: 'space-between', px: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <img 
                         className="nav_logo" 
-                        src={typefaceLogoNew}
+                        src={logoUrl}
                         alt="Fantasy Predictor text logo"
                         style={{ maxHeight: '60px', objectFit: 'contain' }}
                         onError={(e) => {
