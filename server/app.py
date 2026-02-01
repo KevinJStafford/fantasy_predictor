@@ -888,9 +888,18 @@ def sync_fixture_scores():
                     print(f"DEBUG sync-scores: Skipping match {idx} - missing team names: home={home_team}, away={away_team}")
                 continue
             
+            # API has isCompleted / is_completed field - use as primary indicator that game is finished
+            api_is_completed = match_data.get('isCompleted') or match_data.get('is_completed')
+            if api_is_completed is True or (isinstance(api_is_completed, str) and str(api_is_completed).lower() in ('true', '1', 'yes')):
+                is_completed = True
+                if idx < 3:
+                    print(f"DEBUG sync-scores: Match {idx} marked as completed from isCompleted: {api_is_completed}")
+
             # Debug: Show structure for first few matches
             if idx < 3:
                 print(f"DEBUG sync-scores: Match {idx} structure - keys: {list(match_data.keys())[:20]}")
+                if 'isCompleted' in match_data:
+                    print(f"DEBUG sync-scores: Match {idx} isCompleted: {match_data['isCompleted']}")
                 if 'score' in match_data:
                     print(f"DEBUG sync-scores: Match {idx} score structure: {match_data['score']}")
                 if 'status' in match_data:
