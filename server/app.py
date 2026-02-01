@@ -140,7 +140,7 @@ def get_available_rounds():
             }, 200)
         
         return make_response({
-            'rounds': round_numbers, 
+            'rounds': round_numbers,
             'total_fixtures': total_fixtures,
             'fixtures_with_rounds': fixtures_with_rounds
         }, 200)
@@ -149,6 +149,36 @@ def get_available_rounds():
         print(f"Error in get_available_rounds: {str(e)}")
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/fixtures/next-incomplete-round', methods=['GET'])
+def get_next_incomplete_round():
+    """Return the smallest game week (round) that has at least one fixture not yet completed."""
+    try:
+        # Smallest round that has at least one fixture with is_completed = False
+        next_round_row = (
+            db.session.query(Fixture.fixture_round)
+            .filter(Fixture.is_completed == False)
+            .filter(Fixture.fixture_round.isnot(None))
+            .order_by(Fixture.fixture_round.asc())
+            .first()
+        )
+        if next_round_row:
+            return make_response({'round': next_round_row[0]}, 200)
+        # All fixtures completed: return the latest round so user sees last week
+        max_round_row = (
+            db.session.query(db.func.max(Fixture.fixture_round))
+            .filter(Fixture.fixture_round.isnot(None))
+            .first()
+        )
+        round_num = max_round_row[0] if max_round_row and max_round_row[0] is not None else None
+        return make_response({'round': round_num}, 200)
+    except Exception as e:
+        import traceback
+        print(f"Error in get_next_incomplete_round: {str(e)}")
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
 
 @app.route('/api/v1/fixtures/sync', methods=['POST'])
 def sync_fixtures():

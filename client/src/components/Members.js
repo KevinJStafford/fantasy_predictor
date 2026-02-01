@@ -50,12 +50,32 @@ function Members() {
             return response.json()
         })
         .then(data => {
-            console.log('Available rounds:', data.rounds)
-            setAvailableRounds(data.rounds || [])
+            const rounds = data.rounds || []
+            setAvailableRounds(rounds)
+            return rounds
         })
         .catch(error => {
             console.error('Error fetching rounds:', error)
             setAvailableRounds([])
+            return []
+        })
+    }
+
+    function getNextIncompleteRoundAndLoad() {
+        fetch(apiUrl('/api/v1/fixtures/next-incomplete-round'))
+        .then(response => response.ok ? response.json() : { round: null })
+        .then(data => {
+            const round = data.round != null ? String(data.round) : ''
+            setGameWeek(round)
+            if (round) {
+                getFixtures(parseInt(round, 10))
+            } else {
+                setFilteredFixtures([])
+            }
+        })
+        .catch(() => {
+            setGameWeek('')
+            setFilteredFixtures([])
         })
     }
 
@@ -205,6 +225,11 @@ function Members() {
     useEffect(() => {
         getAvailableRounds()
         getPredictions()
+    }, [])
+
+    // When page opens, show the next not-completed week by default
+    useEffect(() => {
+        getNextIncompleteRoundAndLoad()
     }, [])
 
     const handleDropdownChange = (e) => {
