@@ -837,9 +837,12 @@ def sync_fixture_scores():
                 else:
                     print("DEBUG: No 'status' key in match data")
                 # Check for alternative keys
-                for key in ['matchStatus', 'state', 'completed', 'finished', 'result']:
+                print(f"isCompleted (top-level): {sample.get('isCompleted')}")
+                if isinstance(sample.get('status'), dict):
+                    print(f"status.isCompleted: {sample['status'].get('isCompleted')}")
+                for key in ['matchStatus', 'state', 'completed', 'finished', 'result', 'isCompleted']:
                     if key in sample:
-                        print(f"Found alternative key '{key}': {sample[key]}")
+                        print(f"Found key '{key}': {sample[key]}")
                 import json
                 print(f"Sample match (first 1200 chars): {json.dumps(sample, indent=2, default=str)[:1200]}")
             print("=" * 80)
@@ -859,13 +862,17 @@ def sync_fixture_scores():
                 home_team_data = match_data['homeTeam']
                 if isinstance(home_team_data, dict):
                     home_team = home_team_data.get('name') or home_team_data.get('shortName')
-                    # Check for score nested in homeTeam
-                    if 'score' in home_team_data:
-                        score_val = home_team_data.get('score')
+                    # Check for score nested in homeTeam (try multiple keys)
+                    for score_key in ('score', 'goals', 'displayScore', 'fullTimeScore'):
+                        score_val = home_team_data.get(score_key)
                         if score_val is not None:
-                            actual_home_score = int(score_val)
-                            if idx < 3:
-                                print(f"DEBUG sync-scores: Match {idx} found home score in homeTeam: {actual_home_score}")
+                            try:
+                                actual_home_score = int(score_val)
+                                if idx < 3:
+                                    print(f"DEBUG sync-scores: Match {idx} found home score in homeTeam.{score_key}: {actual_home_score}")
+                                break
+                            except (TypeError, ValueError):
+                                pass
                 else:
                     home_team = str(home_team_data)
             
@@ -873,13 +880,17 @@ def sync_fixture_scores():
                 away_team_data = match_data['awayTeam']
                 if isinstance(away_team_data, dict):
                     away_team = away_team_data.get('name') or away_team_data.get('shortName')
-                    # Check for score nested in awayTeam
-                    if 'score' in away_team_data:
-                        score_val = away_team_data.get('score')
+                    # Check for score nested in awayTeam (try multiple keys)
+                    for score_key in ('score', 'goals', 'displayScore', 'fullTimeScore'):
+                        score_val = away_team_data.get(score_key)
                         if score_val is not None:
-                            actual_away_score = int(score_val)
-                            if idx < 3:
-                                print(f"DEBUG sync-scores: Match {idx} found away score in awayTeam: {actual_away_score}")
+                            try:
+                                actual_away_score = int(score_val)
+                                if idx < 3:
+                                    print(f"DEBUG sync-scores: Match {idx} found away score in awayTeam.{score_key}: {actual_away_score}")
+                                break
+                            except (TypeError, ValueError):
+                                pass
                 else:
                     away_team = str(away_team_data)
             
@@ -888,9 +899,19 @@ def sync_fixture_scores():
                     print(f"DEBUG sync-scores: Skipping match {idx} - missing team names: home={home_team}, away={away_team}")
                 continue
             
-            # API has isCompleted / is_completed field - use as primary indicator that game is finished
+            # API has isCompleted field (top-level or nested under status) - use as primary indicator
+            def _is_completed_true(val):
+                if val is True:
+                    return True
+                if isinstance(val, str) and str(val).lower() in ('true', '1', 'yes'):
+                    return True
+                if isinstance(val, (int, float)) and val:
+                    return True
+                return False
             api_is_completed = match_data.get('isCompleted') or match_data.get('is_completed')
-            if api_is_completed is True or (isinstance(api_is_completed, str) and str(api_is_completed).lower() in ('true', '1', 'yes')):
+            if not _is_completed_true(api_is_completed) and isinstance(match_data.get('status'), dict):
+                api_is_completed = match_data['status'].get('isCompleted') or match_data['status'].get('is_completed')
+            if _is_completed_true(api_is_completed):
                 is_completed = True
                 if idx < 3:
                     print(f"DEBUG sync-scores: Match {idx} marked as completed from isCompleted: {api_is_completed}")
@@ -1103,7 +1124,7 @@ def check_prediction_results():
     Updates the game_result field in Game model.
     """
     try:
-        user_id = session.get('user_id')
+        user_id = get_current_user_id()
         
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
