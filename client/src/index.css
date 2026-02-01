@@ -1,13 +1,15 @@
 :root {
-  --bg: #282c34;
-  --header: #fff;
-  --link: #61dafb;
-  --text: hsla(0, 0%, 100%, 0.88);
+  /* Brand colors (navbar & landing) */
+  --brand-primary: #ff6c26;
+  --brand-primary-hover: #e55a1a;
+  --brand-accent: #f93d3a;
+  --brand-header-bg: #ffffff;
+  --brand-bg: #fafafa;
 }
 
 body {
   margin: 0;
-  background: #f5f5f5;
+  background: var(--brand-bg);
 }
 
 #root {

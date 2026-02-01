@@ -252,6 +252,7 @@ function Members() {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Button 
                 variant="outlined" 
+                color="primary"
                 onClick={() => history.push('/leagues')}
                 sx={{ mr: 2 }}
             >
@@ -261,6 +262,7 @@ function Members() {
             <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button 
                     variant="contained" 
+                    color="primary"
                     onClick={syncFixtures} 
                     disabled={syncing}
                 >
@@ -268,6 +270,7 @@ function Members() {
                 </Button>
                 <Button 
                     variant="outlined" 
+                    color="primary"
                     onClick={() => {
                         setSyncing(true)
                         authenticatedFetch('/api/v1/fixtures/sync-scores', {
@@ -343,7 +346,7 @@ function Members() {
             <Alert severity="warning" sx={{ mb: 2 }}>
                 Missing league selection. Please go back to Leagues and pick a league.
                 <Box sx={{ mt: 1 }}>
-                    <Button variant="outlined" size="small" onClick={() => history.push('/leagues')}>
+                    <Button variant="outlined" color="primary" size="small" onClick={() => history.push('/leagues')}>
                         Go to Leagues
                     </Button>
                 </Box>
@@ -365,7 +368,7 @@ function Members() {
                             <TableContainer component={Paper} sx={{ mb: 2 }}>
                                 <Table size="small" aria-label="predictions">
                                     <TableHead>
-                                        <TableRow sx={{ backgroundColor: '#b3d9f2' }}>
+                                        <TableRow sx={{ backgroundColor: 'primary.light' }}>
                                             <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Home</TableCell>
                                             <TableCell align="center" sx={{ width: 90, fontWeight: 700, fontSize: '1rem' }}>Score</TableCell>
                                             <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Away</TableCell>
@@ -448,7 +451,7 @@ function Members() {
                                                 }}
                                             >
                                                 <TableCell><strong>#{index + 1}</strong></TableCell>
-                                                <TableCell>{player.username}</TableCell>
+                                                <TableCell>{player.display_name}</TableCell>
                                                 <TableCell align="right"><strong>{player.points}</strong></TableCell>
                                                 <TableCell align="right">{player.wins}</TableCell>
                                                 <TableCell align="right">{player.draws}</TableCell>
@@ -474,6 +477,7 @@ function Members() {
                                 </Typography>
                                 <Button 
                                     variant="outlined" 
+                                    color="primary"
                                     size="small"
                                     onClick={() => {
                                         setLoadingPredictions(true)

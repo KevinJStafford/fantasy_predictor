@@ -11,6 +11,7 @@ function Leagues() {
     const [error, setError] = useState(null)
     const [joinDialogOpen, setJoinDialogOpen] = useState(false)
     const [inviteCode, setInviteCode] = useState('')
+    const [joinDisplayName, setJoinDisplayName] = useState('')
     const [joinError, setJoinError] = useState(null)
     const history = useHistory()
 
@@ -47,6 +48,7 @@ function Leagues() {
     function handleJoinLeague() {
         setJoinDialogOpen(true)
         setInviteCode('')
+        setJoinDisplayName('')
         setJoinError(null)
     }
 
@@ -55,16 +57,24 @@ function Leagues() {
             setJoinError('Please enter an invite code')
             return
         }
+        if (!joinDisplayName.trim()) {
+            setJoinError('Please enter a display name for this league')
+            return
+        }
 
         authenticatedFetch('/api/v1/leagues/join-by-code', {
             method: 'POST',
-            body: JSON.stringify({ invite_code: inviteCode.trim() })
+            body: JSON.stringify({
+                invite_code: inviteCode.trim(),
+                display_name: joinDisplayName.trim(),
+            })
         })
         .then(res => res.json())
         .then(data => {
             if (data.league) {
                 setJoinDialogOpen(false)
                 setInviteCode('')
+                setJoinDisplayName('')
                 setJoinError(null)
                 fetchLeagues()
             } else {
@@ -87,6 +97,7 @@ function Leagues() {
                     </Typography>
                     <Button 
                         variant="outlined" 
+                        color="primary"
                         onClick={handleJoinLeague}
                     >
                         Join League
@@ -112,32 +123,35 @@ function Leagues() {
                         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
                             <Button 
                                 variant="contained" 
+                                color="primary"
                                 onClick={() => {
                                     const name = prompt('Enter league name:')
-                                    if (name) {
-                                        authenticatedFetch('/api/v1/leagues', {
-                                            method: 'POST',
-                                            body: JSON.stringify({ name })
-                                        })
-                                        .then(res => res.json())
-                                        .then(data => {
-                                            if (data.league) {
-                                                fetchLeagues()
-                                            } else {
-                                                alert(data.error || 'Failed to create league')
-                                            }
-                                        })
-                                        .catch(err => {
-                                            console.error('Error creating league:', err)
-                                            alert('Failed to create league')
-                                        })
-                                    }
+                                    if (!name?.trim()) return
+                                    const displayName = prompt('Your display name for this league (unique in this league):')
+                                    if (!displayName?.trim()) return
+                                    authenticatedFetch('/api/v1/leagues', {
+                                        method: 'POST',
+                                        body: JSON.stringify({ name: name.trim(), display_name: displayName.trim() })
+                                    })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        if (data.league) {
+                                            fetchLeagues()
+                                        } else {
+                                            alert(data.error || 'Failed to create league')
+                                        }
+                                    })
+                                    .catch(err => {
+                                        console.error('Error creating league:', err)
+                                        alert('Failed to create league')
+                                    })
                                 }}
                             >
                                 Create League
                             </Button>
                             <Button 
                                 variant="outlined" 
+                                color="primary"
                                 onClick={handleJoinLeague}
                             >
                                 Join League
@@ -186,24 +200,25 @@ function Leagues() {
                                 }}
                                 onClick={() => {
                                     const name = prompt('Enter league name:')
-                                    if (name) {
-                                        authenticatedFetch('/api/v1/leagues', {
-                                            method: 'POST',
-                                            body: JSON.stringify({ name })
-                                        })
-                                        .then(res => res.json())
-                                        .then(data => {
-                                            if (data.league) {
-                                                fetchLeagues()
-                                            } else {
-                                                alert(data.error || 'Failed to create league')
-                                            }
-                                        })
-                                        .catch(err => {
-                                            console.error('Error creating league:', err)
-                                            alert('Failed to create league')
-                                        })
-                                    }
+                                    if (!name?.trim()) return
+                                    const displayName = prompt('Your display name for this league (unique in this league):')
+                                    if (!displayName?.trim()) return
+                                    authenticatedFetch('/api/v1/leagues', {
+                                        method: 'POST',
+                                        body: JSON.stringify({ name: name.trim(), display_name: displayName.trim() })
+                                    })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        if (data.league) {
+                                            fetchLeagues()
+                                        } else {
+                                            alert(data.error || 'Failed to create league')
+                                        }
+                                    })
+                                    .catch(err => {
+                                        console.error('Error creating league:', err)
+                                        alert('Failed to create league')
+                                    })
                                 }}
                             >
                                 <CardContent sx={{ textAlign: 'center', py: 4 }}>
@@ -238,6 +253,20 @@ function Leagues() {
                             }}
                             sx={{ mt: 2 }}
                         />
+                        <TextField
+                            margin="dense"
+                            label="Your display name for this league"
+                            placeholder="Must be unique in this league"
+                            type="text"
+                            fullWidth
+                            variant="standard"
+                            value={joinDisplayName}
+                            onChange={(e) => {
+                                setJoinDisplayName(e.target.value)
+                                setJoinError(null)
+                            }}
+                            sx={{ mt: 2 }}
+                        />
                         {joinError && (
                             <Alert severity="error" sx={{ mt: 2 }}>
                                 {joinError}
@@ -246,7 +275,7 @@ function Leagues() {
                     </DialogContent>
                     <DialogActions>
                         <Button onClick={() => setJoinDialogOpen(false)}>Cancel</Button>
-                        <Button onClick={handleJoinSubmit} variant="contained">Join</Button>
+                        <Button onClick={handleJoinSubmit} variant="contained" color="primary">Join</Button>
                     </DialogActions>
                 </Dialog>
             </Container>

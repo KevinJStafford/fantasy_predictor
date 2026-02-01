@@ -13,7 +13,7 @@ from flask_restful import Resource
 # Local imports
 from config import app, db, api
 # Add your model imports
-from models import User, Game, Prediction, Fixture, League
+from models import User, Game, Prediction, Fixture, League, LeagueMembership
 
 # JWT token helper functions
 def generate_token(user_id):
@@ -1316,21 +1316,22 @@ def logout():
 def login():
     data = request.get_json()
     try:
-        user = User.query.filter_by(username=data['username']).first()
-        if user and user.authenticate(data['password']):
-            # Set session for backward compatibility
+        email = (data.get('email') or '').strip()
+        password = data.get('password')
+        if not email or not password:
+            return make_response({'error': 'Email and password are required'}, 400)
+        user = User.query.filter_by(email=email).first()
+        if user and user.authenticate(password):
             session['user_id'] = user.id
-            # Generate JWT token for cross-domain auth
             token = generate_token(user.id)
             return make_response({
                 'user': user.to_dict(),
                 'token': token
             }, 200)
-        else:
-            return make_response({'error': 'Password incorrect'}, 401)
+        return make_response({'error': 'Invalid email or password'}, 401)
     except Exception as e:
         print(f"Login error: {str(e)}")
-        return make_response({'error': 'username incorrect'}, 401)
+        return make_response({'error': 'Invalid email or password'}, 401)
     
 
 @app.route('/')
@@ -1359,34 +1360,34 @@ def get_user_leagues():
 
 @app.route('/api/v1/leagues', methods=['POST'])
 def create_league():
-    """Create a new league"""
+    """Create a new league. Requires display_name (your username for this league)."""
     try:
         user_id = get_current_user_id()
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
         data = request.get_json()
-        league_name = data.get('name')
+        league_name = (data.get('name') or '').strip()
+        display_name = (data.get('display_name') or '').strip()
         if not league_name:
             return make_response({'error': 'League name is required'}, 400)
+        if not display_name:
+            return make_response({'error': 'Display name for this league is required'}, 400)
         
-        # Generate unique invite code (6 uppercase alphanumeric characters)
         import random
         import string
         while True:
             invite_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-            # Check if code already exists
             existing = League.query.filter_by(invite_code=invite_code).first()
             if not existing:
                 break
         
         league = League(name=league_name, invite_code=invite_code, created_by=user_id)
         db.session.add(league)
-        db.session.flush()  # Get the league ID
+        db.session.flush()
         
-        # Add creator as a member
-        user = User.query.get(user_id)
-        league.members.append(user)
+        membership = LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name)
+        db.session.add(membership)
         db.session.commit()
         
         return make_response({'league': league.to_dict()}, 201)
@@ -1399,23 +1400,29 @@ def create_league():
 
 @app.route('/api/v1/leagues/<int:league_id>/join', methods=['POST'])
 def join_league(league_id):
-    """Join a league by ID"""
+    """Join a league by ID. Requires display_name (your username in this league), unique per league."""
     try:
         user_id = get_current_user_id()
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
+        data = request.get_json() or {}
+        display_name = (data.get('display_name') or '').strip()
+        if not display_name:
+            return make_response({'error': 'Display name for this league is required'}, 400)
+        
         league = League.query.get(league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
-        user = User.query.get(user_id)
-        if user in league.members:
-            return make_response({'error': 'User is already a member of this league'}, 400)
+        if LeagueMembership.query.filter_by(league_id=league_id, user_id=user_id).first():
+            return make_response({'error': 'You are already a member of this league'}, 400)
+        if LeagueMembership.query.filter_by(league_id=league_id, display_name=display_name).first():
+            return make_response({'error': 'That display name is already taken in this league'}, 400)
         
-        league.members.append(user)
+        db.session.add(LeagueMembership(user_id=user_id, league_id=league_id, display_name=display_name))
         db.session.commit()
-        
+        league = League.query.get(league_id)
         return make_response({'league': league.to_dict()}, 200)
     except Exception as e:
         db.session.rollback()
@@ -1426,29 +1433,33 @@ def join_league(league_id):
 
 @app.route('/api/v1/leagues/join-by-code', methods=['POST'])
 def join_league_by_code():
-    """Join a league using an invite code"""
+    """Join a league using an invite code. Requires display_name (your username in this league), unique per league."""
     try:
         user_id = get_current_user_id()
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
-        data = request.get_json()
-        invite_code = data.get('invite_code', '').strip().upper()
+        data = request.get_json() or {}
+        invite_code = (data.get('invite_code') or '').strip().upper()
+        display_name = (data.get('display_name') or '').strip()
         
         if not invite_code:
             return make_response({'error': 'Invite code is required'}, 400)
+        if not display_name:
+            return make_response({'error': 'Display name for this league is required'}, 400)
         
         league = League.query.filter_by(invite_code=invite_code).first()
         if not league:
             return make_response({'error': 'Invalid invite code'}, 404)
         
-        user = User.query.get(user_id)
-        if user in league.members:
+        if LeagueMembership.query.filter_by(league_id=league.id, user_id=user_id).first():
             return make_response({'error': 'You are already a member of this league'}, 400)
+        if LeagueMembership.query.filter_by(league_id=league.id, display_name=display_name).first():
+            return make_response({'error': 'That display name is already taken in this league'}, 400)
         
-        league.members.append(user)
+        db.session.add(LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name))
         db.session.commit()
-        
+        league = League.query.get(league.id)
         return make_response({'league': league.to_dict()}, 200)
     except Exception as e:
         db.session.rollback()
@@ -1502,9 +1513,10 @@ def get_league_leaderboard(league_id):
                     return f
             return None
 
-        # Calculate points for each member (compute from fixtures so everyone's score shows even if they haven't refreshed)
+        # Calculate points per member using LeagueMembership for display_name
         leaderboard = []
-        for member in league.members:
+        for lm in league.league_memberships:
+            member = lm.user
             games = Game.query.filter_by(user_id=member.id).all()
             wins = 0
             draws = 0
@@ -1521,7 +1533,7 @@ def get_league_leaderboard(league_id):
             points = (wins * 3) + (draws * 1) + (losses * 0)
             leaderboard.append({
                 'user_id': member.id,
-                'username': member.username,
+                'display_name': lm.display_name,
                 'wins': wins,
                 'draws': draws,
                 'losses': losses,

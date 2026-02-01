@@ -15,7 +15,7 @@ function Navbar() {
     };
 
     return (
-        <AppBar position="static" sx={{ backgroundColor: '#fff', boxShadow: 1 }}>
+        <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1 }}>
             <Toolbar sx={{ justifyContent: 'space-between', px: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <img 
@@ -31,7 +31,7 @@ function Navbar() {
                 </Box>
                 <Box>
                     <IconButton onClick={handleAvatarClick} aria-label={isLoggedIn ? 'Go to players' : 'Go to login'} sx={{ p: 0 }}>
-                        <Avatar sx={{ bgcolor: '#ff6c26' }} variant="rounded">
+                        <Avatar sx={{ bgcolor: 'primary.main' }} variant="rounded">
                             <AccountBoxIcon />
                         </Avatar>
                     </IconButton>

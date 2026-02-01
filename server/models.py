@@ -4,29 +4,36 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from config import db, bcrypt
 
 # Models go here!
-# Association table for many-to-many relationship between Users and Leagues
-user_league = db.Table('user_league',
-    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
-    db.Column('league_id', db.Integer, db.ForeignKey('leagues.id'), primary_key=True),
-    db.Column('joined_at', db.DateTime, server_default=db.func.now())
-)
+
+class LeagueMembership(db.Model, SerializerMixin):
+    """Association: user in a league with a display name unique per league."""
+    __tablename__ = 'league_memberships'
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), primary_key=True)
+    display_name = db.Column(db.String, nullable=False)  # unique per league
+    joined_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    __table_args__ = (db.UniqueConstraint('league_id', 'display_name', name='uq_league_display_name'),)
+
+    user = db.relationship('User', back_populates='league_memberships')
+    league = db.relationship('League', back_populates='league_memberships')
+
 
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
 
-    serialize_rules=('-password_hash', )
+    serialize_rules = ('-password_hash',)
 
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String, nullable=False)
-    email = db.Column(db.String, nullable=True)
+    username = db.Column(db.String, nullable=True)  # optional; league display_name used per league
+    email = db.Column(db.String, unique=True, nullable=False)
     _password_hash = db.Column(db.String)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
-    # Relationships
-    # predictions = db.relationship('Prediction', back_populates='user', cascade='all, delete-orphan')
-    # games = association_proxy('predictions', 'game')
-    leagues = db.relationship('League', secondary=user_league, back_populates='members')
+    league_memberships = db.relationship('LeagueMembership', back_populates='user')
+    leagues = association_proxy('league_memberships', 'league')
 
     @property
     def password_hash(self):
@@ -93,7 +100,7 @@ class Fixture(db.Model, SerializerMixin):
 class League(db.Model, SerializerMixin):
     __tablename__ = 'leagues'
 
-    serialize_rules = ('-members.leagues', '-members._password_hash',)  # Prevent circular serialization
+    serialize_rules = ('-league_memberships.user.leagues', '-league_memberships.user._password_hash',)
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
@@ -102,11 +109,12 @@ class League(db.Model, SerializerMixin):
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
-    # Relationships
-    members = db.relationship('User', secondary=user_league, back_populates='leagues')
+    # Relationships: members via LeagueMembership (each has display_name per league)
+    league_memberships = db.relationship('LeagueMembership', back_populates='league')
+    members = association_proxy('league_memberships', 'user')
 
     def to_dict(self, rules=None):
-        """Custom to_dict to prevent circular references"""
+        """Custom to_dict: members include display_name from LeagueMembership"""
         data = {
             'id': self.id,
             'name': self.name,
@@ -115,21 +123,18 @@ class League(db.Model, SerializerMixin):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
-        
-        # Include members but without their leagues to prevent recursion
-        if hasattr(self, 'members') and self.members:
+        if hasattr(self, 'league_memberships') and self.league_memberships:
             data['members'] = [
                 {
-                    'id': member.id,
-                    'username': member.username,
-                    'email': member.email,
-                    'created_at': member.created_at.isoformat() if member.created_at else None,
+                    'id': lm.user.id,
+                    'display_name': lm.display_name,
+                    'email': lm.user.email,
+                    'created_at': lm.user.created_at.isoformat() if lm.user.created_at else None,
                 }
-                for member in self.members
+                for lm in self.league_memberships
             ]
         else:
             data['members'] = []
-        
         return data
 
     def __repr__(self):

@@ -12,22 +12,21 @@ function Signup({setUser}) {
     const history = useHistory();
 
     const signupSchema = yup.object().shape({
-        username: yup.string()
-        .min(5, 'Username is too short!')
-        .max(18, 'Username is too long!')
-        .required('Username is Required!'),
-        email: yup.string().email('Invalid email'),
+        email: yup.string().email('Invalid email').required('Email is required'),
         password: yup.string()
-        .min(5, 'Password is too short!')
-        .max(18, 'Password is too long!')
-        .required('Password is Required!')
+            .min(5, 'Password is too short!')
+            .max(72, 'Password is too long!')
+            .required('Password is required'),
+        confirm_password: yup.string()
+            .oneOf([yup.ref('password'), null], 'Passwords must match')
+            .required('Please confirm your password'),
     })
 
     const formik = useFormik({
         initialValues: {
-            username: '',
             email: '',
             password: '',
+            confirm_password: '',
         },
         validationSchema: signupSchema,
         onSubmit: (values) => {
@@ -36,7 +35,11 @@ function Signup({setUser}) {
                 headers: {
                     "Content-type": 'application/json'
                 },
-                body: JSON.stringify(values)
+                body: JSON.stringify({
+                    email: values.email,
+                    password: values.password,
+                    confirm_password: values.confirm_password,
+                })
             }).then((resp) => {
                 if (resp.ok) {
                     resp.json().then(({user, token}) => {
@@ -47,7 +50,9 @@ function Signup({setUser}) {
                         history.push('/leagues')
                     })
                 } else {
-                    console.log('errors? handle error')
+                    resp.json().then((data) => {
+                        alert(data.error || 'Signup failed. Please try again.')
+                    }).catch(() => alert('Signup failed. Please try again.'))
                 }
             })
         }
@@ -62,35 +67,24 @@ function Signup({setUser}) {
         <Container maxWidth="xs">
             <form onSubmit={formik.handleSubmit}>
                 <Box>
-                <TextField
+                <TextField 
                     sx={{ width: 1}}
-                    id="username" 
-                    label="Username" 
+                    id="email" 
+                    label="Email" 
+                    type="email"
                     variant="standard"
-                    error={!!formik.errors.username}
-                    helperText={formik.errors.username}
+                    error={!!formik.errors.email}
+                    helperText={formik.errors.email}
                     required
-                    value={formik.values.username}
+                    value={formik.values.email}
                     onChange={formik.handleChange}
                 />
                 </Box>
                 <Box>
                 <TextField 
                     sx={{ width: 1}}
-                    id="email" 
-                    label="email" 
-                    variant="standard"
-                    error={!!formik.errors.email}
-                    helperText={formik.errors.email}
-                    value={formik.values.email}
-                   onChange={formik.handleChange}
-                  />
-                </Box>
-                <Box>
-                <TextField 
-                    sx={{ width: 1}}
                     id="password" 
-                    label="password"
+                    label="Password"
                     type="password"
                     variant="standard"
                     error={!!formik.errors.password}
@@ -98,10 +92,24 @@ function Signup({setUser}) {
                     required
                     value={formik.values.password}
                     onChange={formik.handleChange} 
-                  />
+                />
+                </Box>
+                <Box>
+                <TextField 
+                    sx={{ width: 1}}
+                    id="confirm_password" 
+                    label="Confirm password"
+                    type="password"
+                    variant="standard"
+                    error={!!formik.errors.confirm_password}
+                    helperText={formik.errors.confirm_password}
+                    required
+                    value={formik.values.confirm_password}
+                    onChange={formik.handleChange} 
+                />
                 </Box>
                 <hr></hr>
-                <Button fullWidth='True'variant="outlined" type="submit">Submit</Button>
+                <Button fullWidth variant="contained" color="primary" type="submit">Submit</Button>
             </form>
         </Container>
             </div>

@@ -10,15 +10,13 @@ import Navbar from './Navbar'
 function Login({setUser}) {
     const history = useHistory();
     const loginSchema = yup.object().shape({
-        username: yup.string()
-        .required('Username is Required!'),
-        password: yup.string()
-        .required('Password is Required!')
+        email: yup.string().email('Invalid email').required('Email is required'),
+        password: yup.string().required('Password is required'),
     })
 
     const formik = useFormik({
         initialValues: {
-            username: '',
+            email: '',
             password: '',
         },
         validationSchema: loginSchema,
@@ -28,7 +26,7 @@ function Login({setUser}) {
                 headers: {
                     "Content-type": 'application/json'
                 },
-                body: JSON.stringify(values)
+                body: JSON.stringify({ email: values.email, password: values.password })
             }).then((resp) => {
                 if (resp.ok) {
                     resp.json().then(({user, token}) => {
@@ -41,7 +39,7 @@ function Login({setUser}) {
                 } else {
                     resp.json().then((data) => {
                         console.error('Login error:', data.error || 'Login failed')
-                        alert(data.error || 'Login failed. Please check your username and password.')
+                        alert(data.error || 'Login failed. Please check your email and password.')
                     }).catch(() => {
                         alert('Login failed. Please try again.')
                     })
@@ -64,13 +62,14 @@ function Login({setUser}) {
                 <Box>
                 <TextField
                     sx={{ width: 1}}
-                    id="username" 
-                    label="Username" 
+                    id="email" 
+                    label="Email" 
+                    type="email"
                     variant="standard"
-                    error={!!formik.errors.username}
-                    helperText={formik.errors.username}
+                    error={!!formik.errors.email}
+                    helperText={formik.errors.email}
                     required
-                    value={formik.values.username}
+                    value={formik.values.email}
                     onChange={formik.handleChange}
                 />
                 </Box>
@@ -88,7 +87,7 @@ function Login({setUser}) {
                     onChange={formik.handleChange}/>
                 </Box>
                 <hr></hr>
-                <Button fullWidth='True' variant="outlined" type="submit">Submit</Button>
+                <Button fullWidth variant="contained" color="primary" type="submit">Submit</Button>
             </form>
         </Container>
             </div>
