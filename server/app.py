@@ -2,6 +2,7 @@
 
 # Standard library imports
 import os
+import secrets
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -1332,7 +1333,59 @@ def login():
     except Exception as e:
         print(f"Login error: {str(e)}")
         return make_response({'error': 'Invalid email or password'}, 401)
-    
+
+
+@app.route('/api/v1/forgot-password', methods=['POST'])
+def forgot_password():
+    """Request a password reset link. Always returns 200 to avoid email enumeration."""
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip()
+    if not email:
+        return make_response({'error': 'Email is required'}, 400)
+    frontend_url = (data.get('frontend_url') or '').strip() or os.getenv('RESET_PASSWORD_BASE_URL', '')
+    user = User.query.filter_by(email=email).first()
+    if user:
+        user.reset_token = secrets.token_urlsafe(32)
+        user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        db.session.commit()
+        # HashRouter uses #/path; build link so client can open it
+        reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
+        return make_response({
+            'message': "If an account exists with that email, we've sent a reset link.",
+            'reset_link': reset_link,
+        }, 200)
+    return make_response({
+        'message': "If an account exists with that email, we've sent a reset link.",
+    }, 200)
+
+
+@app.route('/api/v1/reset-password', methods=['POST'])
+def reset_password():
+    """Reset password using a valid token from the forgot-password flow."""
+    data = request.get_json() or {}
+    token = (data.get('token') or '').strip()
+    password = data.get('password')
+    confirm_password = data.get('confirm_password')
+    if not token:
+        return make_response({'error': 'Reset token is required'}, 400)
+    if not password:
+        return make_response({'error': 'Password is required'}, 400)
+    if password != confirm_password:
+        return make_response({'error': 'Password and confirmation do not match'}, 400)
+    now = datetime.now(timezone.utc)
+    user = User.query.filter(
+        User.reset_token == token,
+        User.reset_token_expires.isnot(None),
+        User.reset_token_expires > now,
+    ).first()
+    if not user:
+        return make_response({'error': 'Invalid or expired reset link. Please request a new one.'}, 400)
+    user.password_hash = password
+    user.reset_token = None
+    user.reset_token_expires = None
+    db.session.commit()
+    return make_response({'message': 'Password reset successfully. You can now log in.'}, 200)
+
 
 @app.route('/')
 def index():

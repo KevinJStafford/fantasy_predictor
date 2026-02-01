@@ -1,7 +1,7 @@
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
-import {useHistory} from 'react-router-dom';
+import { useHistory, Link } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { saveToken } from '../utils/auth';
 
@@ -85,6 +85,11 @@ function Login({setUser}) {
                     required
                     value={formik.values.password}
                     onChange={formik.handleChange}/>
+                </Box>
+                <Box sx={{ mt: 1, textAlign: 'center' }}>
+                    <Link to="/forgot-password" style={{ fontSize: '0.875rem', color: 'inherit' }}>
+                        Forgot password?
+                    </Link>
                 </Box>
                 <hr></hr>
                 <Button fullWidth variant="contained" color="primary" type="submit">Submit</Button>

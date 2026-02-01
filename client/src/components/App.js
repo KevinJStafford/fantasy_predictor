@@ -5,6 +5,8 @@ import Signup from './Signup';
 import Navbar from './Navbar';
 import LandingGrid from "./LandingGrid";
 import Login from "./Login";
+import ForgotPassword from "./ForgotPassword";
+import ResetPassword from "./ResetPassword";
 import Members from "./Members";
 import Leagues from "./Leagues";
 
@@ -24,6 +26,12 @@ function App() {
         </Route>
         <Route exact path="/login">
           <Login setUser={setUser} />
+        </Route>
+        <Route exact path="/forgot-password">
+          <ForgotPassword />
+        </Route>
+        <Route exact path="/reset-password">
+          <ResetPassword />
         </Route>
         <Route exact path="/leagues">
           <Leagues />

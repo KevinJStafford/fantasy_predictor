@@ -23,12 +23,14 @@ class LeagueMembership(db.Model, SerializerMixin):
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
 
-    serialize_rules = ('-password_hash',)
+    serialize_rules = ('-password_hash', '-reset_token', '-reset_token_expires',)
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=True)  # optional; league display_name used per league
     email = db.Column(db.String, unique=True, nullable=False)
     _password_hash = db.Column(db.String)
+    reset_token = db.Column(db.String, nullable=True)
+    reset_token_expires = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
