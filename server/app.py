@@ -1444,18 +1444,51 @@ def get_league_leaderboard(league_id):
         if user not in league.members:
             return make_response({'error': 'User is not a member of this league'}, 403)
         
-        # Calculate points for each member
+        # Helper: compute Win/Draw/Loss from predicted vs actual scores (same logic as check-results)
+        def _result_for_game(game, fixture):
+            if not fixture or not fixture.is_completed or fixture.actual_home_score is None or fixture.actual_away_score is None:
+                return None
+            if game.home_team_score is None or game.away_team_score is None:
+                return None
+            pred_home, pred_away = game.home_team_score, game.away_team_score
+            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
+            if pred_home == actual_home and pred_away == actual_away:
+                return 'Win'
+            pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+            actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+            return 'Draw' if pred_winner == actual_winner else 'Loss'
+
+        def _fixture_for_game(game):
+            f = Fixture.query.filter_by(
+                fixture_home_team=game.home_team,
+                fixture_away_team=game.away_team
+            ).first()
+            if f:
+                return f
+            for f in Fixture.query.all():
+                if (f.fixture_home_team and f.fixture_away_team and
+                        f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
+                        f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
+                    return f
+            return None
+
+        # Calculate points for each member (compute from fixtures so everyone's score shows even if they haven't refreshed)
         leaderboard = []
         for member in league.members:
-            # Get all games for this user
             games = Game.query.filter_by(user_id=member.id).all()
-            
-            # Calculate points: Win=3, Draw=1, Loss=0
-            wins = sum(1 for g in games if g.game_result == 'Win')
-            draws = sum(1 for g in games if g.game_result == 'Draw')
-            losses = sum(1 for g in games if g.game_result == 'Loss')
+            wins = 0
+            draws = 0
+            losses = 0
+            for g in games:
+                fixture = _fixture_for_game(g)
+                result = _result_for_game(g, fixture)
+                if result == 'Win':
+                    wins += 1
+                elif result == 'Draw':
+                    draws += 1
+                elif result == 'Loss':
+                    losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
-            
             leaderboard.append({
                 'user_id': member.id,
                 'username': member.username,
