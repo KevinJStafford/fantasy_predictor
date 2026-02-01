@@ -223,7 +223,7 @@ function Members() {
     return (
         <>
         <Navbar />
-        <div>
+        <Box component="div" sx={{ px: 2, pr: { xs: 2, sm: 3, md: 4 } }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Button 
                 variant="outlined" 
@@ -368,154 +368,6 @@ function Members() {
                                 No fixtures found for week {gameWeek}. Please sync fixtures first.
                             </Typography>
                         )}
-
-                        {/* Results Section for Selected Week */}
-                        <Box sx={{ mt: 4 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                <Typography variant="h5" component="h2">
-                                    Results - Week {gameWeek}
-                                </Typography>
-                                <Button 
-                                    variant="outlined" 
-                                    size="small"
-                                    onClick={() => {
-                                        setLoadingPredictions(true)
-                                        // Also trigger result check on backend
-                                        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
-                                            .then(res => res.json())
-                                            .then(data => {
-                                                console.log('Check results response:', data)
-                                                getPredictions() // Refresh after checking
-                                                if (leagueId) {
-                                                    fetchLeaderboard() // Refresh leaderboard
-                                                }
-                                                if (data.fixtures_not_found > 0 || data.fixtures_no_scores > 0) {
-                                                    setSyncMessage({
-                                                        type: 'warning',
-                                                        text: `Results checked. ${data.wins || 0}W/${data.draws || 0}D/${data.losses || 0}L. ${data.fixtures_not_found || 0} not found, ${data.fixtures_no_scores || 0} missing scores. Try "Sync Scores" first.`
-                                                    })
-                                                    setTimeout(() => setSyncMessage(null), 8000)
-                                                }
-                                            })
-                                            .catch(err => {
-                                                console.error('Error checking results:', err)
-                                                setSyncMessage({ type: 'error', text: 'Failed to check results' })
-                                                setTimeout(() => setSyncMessage(null), 5000)
-                                            })
-                                            .finally(() => setLoadingPredictions(false))
-                                    }}
-                                    disabled={loadingPredictions}
-                                >
-                                    {loadingPredictions ? 'Loading...' : 'Refresh'}
-                                </Button>
-                            </Box>
-
-                            {loadingPredictions ? (
-                                <Typography variant="body2">Loading results...</Typography>
-                            ) : (() => {
-                                // Filter to only completed fixtures with predictions for the selected game week
-                                const selectedRound = parseInt(gameWeek)
-                                const completedPredictions = predictions
-                                    .filter(p => {
-                                        // Must have a fixture
-                                        if (!p.fixture) return false
-                                        
-                                        // Must be completed with scores
-                                        if (!p.fixture.is_completed || 
-                                            p.fixture.actual_home_score === null || 
-                                            p.fixture.actual_away_score === null) {
-                                            return false
-                                        }
-                                        
-                                        // Must match the selected game week
-                                        const fixtureRound = p.fixture.round
-                                        return fixtureRound === selectedRound
-                                    })
-                                    .sort((a, b) => {
-                                        // Sort chronologically by fixture date (oldest first)
-                                        const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
-                                        const dateB = b.fixture?.date ? new Date(b.fixture.date).getTime() : 0
-                                        return dateA - dateB
-                                    })
-
-                                if (completedPredictions.length === 0) {
-                                    return (
-                                        <Typography variant="body2" sx={{ mt: 2 }}>
-                                            No completed predictions for this week yet.
-                                        </Typography>
-                                    )
-                                }
-
-                                // Calculate stats
-                                const wins = completedPredictions.filter(p => p.game_result === 'Win').length
-                                const draws = completedPredictions.filter(p => p.game_result === 'Draw').length
-                                const losses = completedPredictions.filter(p => p.game_result === 'Loss').length
-
-                                return (
-                                    <>
-                                        <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                            <Chip 
-                                                label={`W: ${wins}`} 
-                                                color="success" 
-                                                size="small"
-                                            />
-                                            <Chip 
-                                                label={`D: ${draws}`} 
-                                                color="warning" 
-                                                size="small"
-                                            />
-                                            <Chip 
-                                                label={`L: ${losses}`} 
-                                                color="error" 
-                                                size="small"
-                                            />
-                                        </Box>
-
-                                        <Box sx={{ maxHeight: '50vh', overflowY: 'auto' }}>
-                                            {completedPredictions.map((prediction) => {
-                                                const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
-                                                
-                                                // Determine result color
-                                                let resultColor = 'default'
-                                                if (game_result === 'Win') resultColor = 'success'
-                                                else if (game_result === 'Draw') resultColor = 'warning'
-                                                else if (game_result === 'Loss') resultColor = 'error'
-
-                                                return (
-                                                    <Card key={prediction.id} sx={{ mb: 1.5 }}>
-                                                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                                                <Typography variant="subtitle2">
-                                                                    Week {fixture?.round || 'N/A'}
-                                                                </Typography>
-                                                                <Chip 
-                                                                    label={game_result || 'Pending'} 
-                                                                    color={resultColor}
-                                                                    size="small"
-                                                                />
-                                                            </Box>
-
-                                                            <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                                                                {home_team} vs {away_team}
-                                                            </Typography>
-
-                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                                <Typography variant="caption">
-                                                                    Pred: {home_team_score}-{away_team_score}
-                                                                </Typography>
-                                                                <Typography variant="caption" color="textSecondary">
-                                                                    Actual: {fixture.actual_home_score}-{fixture.actual_away_score}
-                                                                </Typography>
-                                                            </Box>
-                                                        </CardContent>
-                                                    </Card>
-                                                )
-                                            })}
-                                        </Box>
-                                    </>
-                                )
-                            })()}
-                        </Box>
                     </>
                 ) : (
                     <Typography variant="body1" sx={{ mt: 2 }}>
@@ -524,11 +376,11 @@ function Members() {
                 )}
             </Grid>
 
-            {/* Right side: Leaderboard (always visible) */}
-            <Grid item xs={12} md={5}>
+            {/* Right side: Leaderboard + Results (with padding from edge) */}
+            <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
                 <Box sx={{ position: 'sticky', top: 20 }}>
                     {/* Leaderboard Table */}
-                    <Box sx={{ mb: 4 }}>
+                    <Box sx={{ mb: 3 }}>
                         <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
                             League Leaderboard
                         </Typography>
@@ -576,10 +428,114 @@ function Members() {
                             </Typography>
                         )}
                     </Box>
+
+                    {/* Results Section for Selected Week (below leaderboard) */}
+                    {gameWeek && (
+                        <Box sx={{ mt: 3 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                                <Typography variant="h6" component="h2">
+                                    Results - Week {gameWeek}
+                                </Typography>
+                                <Button 
+                                    variant="outlined" 
+                                    size="small"
+                                    onClick={() => {
+                                        setLoadingPredictions(true)
+                                        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+                                            .then(res => res.json())
+                                            .then(data => {
+                                                getPredictions()
+                                                if (leagueId) fetchLeaderboard()
+                                                if (data.fixtures_not_found > 0 || data.fixtures_no_scores > 0) {
+                                                    setSyncMessage({
+                                                        type: 'warning',
+                                                        text: `Results checked. ${data.wins || 0}W/${data.draws || 0}D/${data.losses || 0}L. ${data.fixtures_not_found || 0} not found, ${data.fixtures_no_scores || 0} missing scores. Try "Sync Scores" first.`
+                                                    })
+                                                    setTimeout(() => setSyncMessage(null), 8000)
+                                                }
+                                            })
+                                            .catch(err => {
+                                                setSyncMessage({ type: 'error', text: 'Failed to check results' })
+                                                setTimeout(() => setSyncMessage(null), 5000)
+                                            })
+                                            .finally(() => setLoadingPredictions(false))
+                                    }}
+                                    disabled={loadingPredictions}
+                                >
+                                    {loadingPredictions ? 'Loading...' : 'Refresh'}
+                                </Button>
+                            </Box>
+
+                            {loadingPredictions ? (
+                                <Typography variant="body2">Loading results...</Typography>
+                            ) : (() => {
+                                const selectedRound = parseInt(gameWeek)
+                                const completedPredictions = predictions
+                                    .filter(p => {
+                                        if (!p.fixture) return false
+                                        if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
+                                        return (p.fixture.round === selectedRound)
+                                    })
+                                    .sort((a, b) => {
+                                        const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
+                                        const dateB = b.fixture?.date ? new Date(b.fixture.date).getTime() : 0
+                                        return dateA - dateB
+                                    })
+
+                                if (completedPredictions.length === 0) {
+                                    return (
+                                        <Typography variant="body2" sx={{ mt: 2 }}>
+                                            No completed predictions for this week yet.
+                                        </Typography>
+                                    )
+                                }
+
+                                const wins = completedPredictions.filter(p => p.game_result === 'Win').length
+                                const draws = completedPredictions.filter(p => p.game_result === 'Draw').length
+                                const losses = completedPredictions.filter(p => p.game_result === 'Loss').length
+
+                                return (
+                                    <>
+                                        <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                            <Chip label={`W: ${wins}`} color="success" size="small" />
+                                            <Chip label={`D: ${draws}`} color="warning" size="small" />
+                                            <Chip label={`L: ${losses}`} color="error" size="small" />
+                                        </Box>
+                                        <Box sx={{ maxHeight: '40vh', overflowY: 'auto' }}>
+                                            {completedPredictions.map((prediction) => {
+                                                const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
+                                                let resultColor = 'default'
+                                                if (game_result === 'Win') resultColor = 'success'
+                                                else if (game_result === 'Draw') resultColor = 'warning'
+                                                else if (game_result === 'Loss') resultColor = 'error'
+                                                return (
+                                                    <Card key={prediction.id} sx={{ mb: 1.5 }}>
+                                                        <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                                                <Typography variant="subtitle2">Week {fixture?.round || 'N/A'}</Typography>
+                                                                <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
+                                                            </Box>
+                                                            <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                                                {home_team} vs {away_team}
+                                                            </Typography>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                                                <Typography variant="caption">Pred: {home_team_score}-{away_team_score}</Typography>
+                                                                <Typography variant="caption" color="textSecondary">Actual: {fixture.actual_home_score}-{fixture.actual_away_score}</Typography>
+                                                            </Box>
+                                                        </CardContent>
+                                                    </Card>
+                                                )
+                                            })}
+                                        </Box>
+                                    </>
+                                )
+                            })()}
+                        </Box>
+                    )}
                 </Box>
             </Grid>
         </Grid>
-        </div>
+        </Box>
         </>
       );
 }
