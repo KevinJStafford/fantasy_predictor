@@ -853,7 +853,8 @@ def sync_fixture_scores():
             actual_home_score = None
             actual_away_score = None
             is_completed = False
-            
+            scores_from_final_result = False
+
             if 'homeTeam' in match_data:
                 home_team_data = match_data['homeTeam']
                 if isinstance(home_team_data, dict):
@@ -914,12 +915,16 @@ def sync_fixture_scores():
                         if idx < 3:
                             print(f"DEBUG sync-scores: Match {idx} found scores in period: {actual_home_score}-{actual_away_score}")
             
-            # Also check if there's a nested structure with scores
-            if actual_home_score is None and 'result' in match_data:
+            # Also check if there's a nested structure with scores (result = final outcome)
+            if 'result' in match_data:
                 result_data = match_data['result']
                 if isinstance(result_data, dict):
-                    actual_home_score = result_data.get('homeScore') or result_data.get('home')
-                    actual_away_score = result_data.get('awayScore') or result_data.get('away')
+                    rh = result_data.get('homeScore') or result_data.get('home')
+                    ra = result_data.get('awayScore') or result_data.get('away')
+                    if rh is not None and ra is not None:
+                        actual_home_score = rh
+                        actual_away_score = ra
+                        scores_from_final_result = True
                     if idx < 3 and actual_home_score is not None:
                         print(f"DEBUG sync-scores: Match {idx} found scores in result: {actual_home_score}-{actual_away_score}")
             
@@ -935,6 +940,8 @@ def sync_fixture_scores():
                         if isinstance(ft, dict):
                             actual_home_score = ft.get('home') or ft.get('homeScore') or ft.get('homeTeam')
                             actual_away_score = ft.get('away') or ft.get('awayScore') or ft.get('awayTeam')
+                            if actual_home_score is not None and actual_away_score is not None:
+                                scores_from_final_result = True
                             if idx < 3:
                                 print(f"DEBUG sync-scores: Match {idx} fullTime scores: {actual_home_score}-{actual_away_score}")
                     elif 'home' in score_data and 'away' in score_data:
@@ -959,28 +966,42 @@ def sync_fixture_scores():
                 print(f"DEBUG sync-scores: Match {idx} has NO 'score' key")
             
             # Check status to see if match is completed
-            # ONLY mark as completed if period is exactly "FullTime" - this is the definitive indicator
-            # Do NOT use resultType, clock, or status fields as they may indicate in-progress games
+            # Accept: period = FullTime/FT/Result, or status/resultType indicating finished, or we have full-time scores
+            COMPLETED_PERIOD_VALUES = {'FULLTIME', 'FULL_TIME', 'FT', 'RESULT', 'FINISHED', 'COMPLETE', 'C', 'ENDED'}
             if 'period' in match_data:
                 period_data = match_data['period']
                 if idx < 3:
                     print(f"DEBUG sync-scores: Match {idx} period: {period_data}")
                 if isinstance(period_data, dict):
                     period_type = period_data.get('type') or period_data.get('label') or period_data.get('name')
-                    # Only accept "FullTime" (case-insensitive) - be strict about this
-                    if period_type and str(period_type).upper() in ['FULLTIME', 'FULL_TIME']:
+                    if period_type and str(period_type).upper().strip() in COMPLETED_PERIOD_VALUES:
                         is_completed = True
                         if idx < 3:
                             print(f"DEBUG sync-scores: Match {idx} marked as completed based on period: {period_data}")
                 elif isinstance(period_data, str):
-                    period_str = str(period_data).upper()
-                    # Only accept "FullTime" (case-insensitive) - be strict about this
-                    if period_str in ['FULLTIME', 'FULL_TIME']:
+                    period_str = str(period_data).upper().strip()
+                    if period_str in COMPLETED_PERIOD_VALUES:
                         is_completed = True
                         if idx < 3:
                             print(f"DEBUG sync-scores: Match {idx} marked as completed based on period: {period_data}")
+            # Also check status / resultType (Premier League API may use these)
+            if not is_completed:
+                for key in ['status', 'resultType', 'matchStatus', 'state']:
+                    val = match_data.get(key)
+                    if val is not None:
+                        s = str(val).upper().strip()
+                        if s in COMPLETED_PERIOD_VALUES or s in {'FINISHED', 'COMPLETE', 'C', 'FT', 'RESULT'}:
+                            is_completed = True
+                            if idx < 3:
+                                print(f"DEBUG sync-scores: Match {idx} marked as completed based on {key}: {val}")
+                            break
+            # If we have both scores from fullTime/result, treat as completed (API may not set period)
+            if not is_completed and scores_from_final_result and actual_home_score is not None and actual_away_score is not None:
+                is_completed = True
+                if idx < 3:
+                    print(f"DEBUG sync-scores: Match {idx} marked as completed (scores from fullTime/result)")
             
-            # Count matches with scores (but don't assume completion - only period/resultType determine completion)
+            # Count matches with scores
             if actual_home_score is not None and actual_away_score is not None:
                 matches_with_scores += 1
                 if matches_with_scores <= 3:
@@ -1011,12 +1032,11 @@ def sync_fixture_scores():
                 
                 # Always update is_completed based on whether period is FullTime
                 # This ensures we reset incorrectly marked games
-                if is_completed and (actual_home_score is not None or actual_away_score is not None):
-                    # Period is FullTime - update fixture with actual scores and mark as completed
-                    if actual_home_score is not None:
-                        fixture.actual_home_score = int(actual_home_score)
-                    if actual_away_score is not None:
-                        fixture.actual_away_score = int(actual_away_score)
+                has_both_scores = actual_home_score is not None and actual_away_score is not None
+                if is_completed and has_both_scores:
+                    # Full-time result - update fixture with actual scores and mark as completed
+                    fixture.actual_home_score = int(actual_home_score)
+                    fixture.actual_away_score = int(actual_away_score)
                     fixture.is_completed = True
                     fixtures_updated += 1
                     fixtures_with_scores += 1
