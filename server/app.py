@@ -626,6 +626,25 @@ class PredictionsResource(Resource):
                         'actual_home_score': fixture.actual_home_score,
                         'actual_away_score': fixture.actual_away_score
                     }
+                    # When fixture is completed with scores, ensure game_result is set (compute and persist if missing)
+                    if (fixture.is_completed and fixture.actual_home_score is not None and
+                            fixture.actual_away_score is not None and
+                            game.home_team_score is not None and game.away_team_score is not None):
+                        if not game.game_result:
+                            pred_home = game.home_team_score
+                            pred_away = game.away_team_score
+                            actual_home = fixture.actual_home_score
+                            actual_away = fixture.actual_away_score
+                            if pred_home == actual_home and pred_away == actual_away:
+                                game.game_result = 'Win'
+                            else:
+                                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+                                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+                                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+                            db.session.add(game)
+                            prediction_data['game_result'] = game.game_result
+                        else:
+                            prediction_data['game_result'] = game.game_result
                 else:
                     prediction_data['fixture'] = None
                     # Debug: print first few unmatched
@@ -633,6 +652,8 @@ class PredictionsResource(Resource):
                         print(f"DEBUG GET predictions: No fixture found for prediction: {game.home_team} vs {game.away_team}")
                 
                 predictions.append(prediction_data)
+            
+            db.session.commit()
             
             print(f"DEBUG GET predictions: Total predictions: {len(predictions)}, Fixtures found: {fixtures_found}, Completed: {fixtures_completed}")
             
