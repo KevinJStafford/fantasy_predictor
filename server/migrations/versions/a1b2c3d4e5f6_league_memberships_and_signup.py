@@ -57,6 +57,17 @@ def upgrade():
         UPDATE users SET email = 'user_' || id || '@migrated.local'
         WHERE email IS NULL OR TRIM(email) = ''
     """))
+    # De-duplicate emails: keep one row per email (smallest id), make others unique
+    connection.execute(sa.text("""
+        UPDATE users SET email = 'user_' || id || '@migrated.local'
+        WHERE id IN (
+            SELECT u.id FROM users u
+            WHERE EXISTS (
+                SELECT 1 FROM users u2
+                WHERE u2.email = u.email AND u2.id < u.id
+            )
+        )
+    """))
     with op.batch_alter_table('users', schema=None) as batch_op:
         batch_op.alter_column('email', existing_type=sa.String(), nullable=False)
         batch_op.alter_column('username', existing_type=sa.String(), nullable=True)
