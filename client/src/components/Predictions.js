@@ -1,6 +1,9 @@
 import * as React from 'react'
-import { Card, CardContent, Typography, TextField, Button, Grid, Alert } from "@mui/material"
-import {useFormik} from 'formik';
+import {
+    Card, CardContent, Typography, TextField, Button, Grid, Alert,
+    TableRow, TableCell,
+} from "@mui/material"
+import { useFormik } from 'formik';
 import { useState, useEffect } from 'react';
 import * as yup from 'yup';
 import { authenticatedFetch } from '../utils/api';
@@ -27,7 +30,7 @@ const parseUtcDate = (value) => {
     return Number.isNaN(d.getTime()) ? null : d
 }
 
-function Predictions({fixture, existingPrediction, onPredictionSaved}) {
+function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRow }) {
     const {fixture_round, fixture_date, fixture_home_team, fixture_away_team, id} = fixture
     const [message, setMessage] = useState(null)
     const [saving, setSaving] = useState(false)
@@ -114,8 +117,6 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
     const formatKickoffLocal = (value) => {
         const date = parseUtcDate(value)
         if (!date) return 'Date TBD'
-
-        // Uses the browser's locale + timezone (no geolocation permission required)
         return new Intl.DateTimeFormat(undefined, {
             weekday: 'short',
             year: 'numeric',
@@ -127,25 +128,81 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
         }).format(date)
     }
 
+    // Day/Time for table: "Saturday 10:00am"
+    const formatDayTime = (value) => {
+        const date = parseUtcDate(value)
+        if (!date) return '—'
+        return new Intl.DateTimeFormat(undefined, {
+            weekday: 'long',
+            hour: 'numeric',
+            minute: '2-digit',
+        }).format(date)
+    }
+
+    // Table row layout: Home | Score | Away | Score | Save (form attribute links inputs to form in last cell)
+    const formId = `prediction-form-${id}`
+    if (asTableRow) {
+        return (
+            <TableRow>
+                <TableCell sx={{ fontWeight: 500 }}>{fixture_home_team}</TableCell>
+                <TableCell align="center" sx={{ width: 90 }}>
+                    <TextField
+                        size="small"
+                        id={`home_team_score_${id}`}
+                        name="home_team_score"
+                        type="number"
+                        variant="outlined"
+                        value={formik.values.home_team_score}
+                        onChange={formik.handleChange}
+                        error={formik.touched.home_team_score && Boolean(formik.errors.home_team_score)}
+                        inputProps={{ form: formId, min: 0, max: 20, style: { textAlign: 'center' } }}
+                        disabled={gameStarted}
+                        sx={{ width: 64 }}
+                    />
+                </TableCell>
+                <TableCell sx={{ fontWeight: 500 }}>{fixture_away_team}</TableCell>
+                <TableCell align="center" sx={{ width: 90 }}>
+                    <TextField
+                        size="small"
+                        id={`away_team_score_${id}`}
+                        name="away_team_score"
+                        type="number"
+                        variant="outlined"
+                        value={formik.values.away_team_score}
+                        onChange={formik.handleChange}
+                        error={formik.touched.away_team_score && Boolean(formik.errors.away_team_score)}
+                        inputProps={{ form: formId, min: 0, max: 20, style: { textAlign: 'center' } }}
+                        disabled={gameStarted}
+                        sx={{ width: 64 }}
+                    />
+                </TableCell>
+                <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
+                <TableCell sx={{ color: 'text.secondary' }}>—</TableCell>
+                <TableCell align="center" sx={{ width: 100 }}>
+                    <form id={formId} onSubmit={formik.handleSubmit}>
+                        <Button type="submit" variant="contained" size="small" disabled={saving || gameStarted}>
+                            {saving ? 'Saving...' : gameStarted ? 'Locked' : 'Save'}
+                        </Button>
+                    </form>
+                </TableCell>
+            </TableRow>
+        )
+    }
+
+    // Card layout (legacy / single fixture)
     return (
         <Card sx={{ mb: 2 }}>
             <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                    Week {fixture_round || 'TBD'}
-                </Typography>
-                
                 {message && (
                     <Alert severity={message.type} sx={{ mb: 2 }}>
                         {message.text}
                     </Alert>
                 )}
-                
                 {gameStarted && (
                     <Alert severity="info" sx={{ mb: 2 }}>
                         This game has started. Predictions are locked and cannot be changed.
                     </Alert>
                 )}
-
                 <form onSubmit={formik.handleSubmit}>
                     <Grid container spacing={2} alignItems="center">
                         <Grid item xs={12} md={4}>
@@ -167,13 +224,9 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
                                 disabled={gameStarted}
                             />
                         </Grid>
-                        
                         <Grid item xs={12} md={1} sx={{ textAlign: 'center' }}>
-                            <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
-                                vs
-                            </Typography>
+                            <Typography variant="h5" sx={{ fontWeight: 'bold' }}>vs</Typography>
                         </Grid>
-                        
                         <Grid item xs={12} md={4}>
                             <Typography variant="body1" sx={{ fontWeight: 'bold', mb: 1 }}>
                                 {fixture_away_team}
@@ -193,7 +246,6 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
                                 disabled={gameStarted}
                             />
                         </Grid>
-                        
                         <Grid item xs={12} md={3}>
                             <Button
                                 fullWidth
@@ -206,7 +258,6 @@ function Predictions({fixture, existingPrediction, onPredictionSaved}) {
                             </Button>
                         </Grid>
                     </Grid>
-                    
                     <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
                         {formatKickoffLocal(fixture_date)}
                     </Typography>

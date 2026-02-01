@@ -355,39 +355,51 @@ function Members() {
             <Grid item xs={12} md={7}>
                 {gameWeek ? (
                     <>
-                        <Typography variant="h4" component="h2" sx={{ mb: 2 }}>
-                            <span>Fixtures for Week {gameWeek}</span>
+                        <Typography variant="h5" component="h2" sx={{ mb: 2, textAlign: 'center', fontWeight: 600 }}>
+                            Game Week #{gameWeek}
                         </Typography>
-                        
+
                         {loadingFixtures ? (
                             <Typography variant="body1">Loading fixtures...</Typography>
                         ) : filteredFixtures.length > 0 ? (
-                            <Box>
-                                {filteredFixtures.map(fixture => {
-                                    // Find matching prediction for this fixture
-                                    const matchingPrediction = predictions.find(p => 
-                                        p.fixture && p.fixture.id === fixture.id
-                                    ) || predictions.find(p => 
-                                        p.home_team && p.away_team &&
-                                        p.home_team.toLowerCase().trim() === fixture.fixture_home_team?.toLowerCase().trim() &&
-                                        p.away_team.toLowerCase().trim() === fixture.fixture_away_team?.toLowerCase().trim()
-                                    )
-                                    
-                                    return (
-                                        <Predictions 
-                                            key={fixture.id} 
-                                            fixture={fixture}
-                                            existingPrediction={matchingPrediction}
-                                            onPredictionSaved={() => {
-                                                getPredictions()
-                                                if (leagueId) {
-                                                    fetchLeaderboard()
-                                                }
-                                            }}
-                                        />
-                                    )
-                                })}
-                            </Box>
+                            <TableContainer component={Paper} sx={{ mb: 2 }}>
+                                <Table size="small" aria-label="predictions">
+                                    <TableHead>
+                                        <TableRow sx={{ backgroundColor: '#b3d9f2' }}>
+                                            <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Home</TableCell>
+                                            <TableCell align="center" sx={{ width: 90, fontWeight: 700, fontSize: '1rem' }}>Score</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Away</TableCell>
+                                            <TableCell align="center" sx={{ width: 90, fontWeight: 700, fontSize: '1rem' }}>Score</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Day/Time</TableCell>
+                                            <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Stadium</TableCell>
+                                            <TableCell align="center" sx={{ width: 100, fontWeight: 700, fontSize: '1rem' }}>Save</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {filteredFixtures.map(fixture => {
+                                            const matchingPrediction = predictions.find(p =>
+                                                p.fixture && p.fixture.id === fixture.id
+                                            ) || predictions.find(p =>
+                                                p.home_team && p.away_team &&
+                                                p.home_team.toLowerCase().trim() === fixture.fixture_home_team?.toLowerCase().trim() &&
+                                                p.away_team.toLowerCase().trim() === fixture.fixture_away_team?.toLowerCase().trim()
+                                            )
+                                            return (
+                                                <Predictions
+                                                    key={fixture.id}
+                                                    fixture={fixture}
+                                                    existingPrediction={matchingPrediction}
+                                                    onPredictionSaved={() => {
+                                                        getPredictions()
+                                                        if (leagueId) fetchLeaderboard()
+                                                    }}
+                                                    asTableRow
+                                                />
+                                            )
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
                         ) : (
                             <Typography variant="body1" sx={{ mt: 2 }}>
                                 No fixtures found for week {gameWeek}. Please sync fixtures first.
