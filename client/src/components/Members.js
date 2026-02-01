@@ -371,7 +371,6 @@ function Members() {
                                             <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Away</TableCell>
                                             <TableCell align="center" sx={{ width: 90, fontWeight: 700, fontSize: '1rem' }}>Score</TableCell>
                                             <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Day/Time</TableCell>
-                                            <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Stadium</TableCell>
                                             <TableCell align="center" sx={{ width: 100, fontWeight: 700, fontSize: '1rem' }}>Save</TableCell>
                                         </TableRow>
                                     </TableHead>

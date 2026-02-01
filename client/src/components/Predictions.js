@@ -177,7 +177,6 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                     />
                 </TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
-                <TableCell sx={{ color: 'text.secondary' }}>—</TableCell>
                 <TableCell align="center" sx={{ width: 100 }}>
                     <form id={formId} onSubmit={formik.handleSubmit}>
                         <Button type="submit" variant="contained" size="small" disabled={saving || gameStarted}>
