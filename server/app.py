@@ -3,6 +3,9 @@
 # Standard library imports
 import os
 import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -49,6 +52,58 @@ def get_current_user_id():
         return user_id
     # Fall back to session (for same-domain auth)
     return session.get('user_id')
+
+
+def get_active_user_by_id(user_id):
+    """Return the User with the given id if they exist and are not soft-deleted; else None."""
+    if not user_id:
+        return None
+    return User.query.filter(User.id == user_id, User.deleted_at.is_(None)).first()
+
+
+def get_active_user_by_email(email):
+    """Return the User with the given email if they exist and are not soft-deleted; else None."""
+    if not email or not email.strip():
+        return None
+    return User.query.filter(User.email == email.strip(), User.deleted_at.is_(None)).first()
+
+
+def send_password_reset_email(to_email, reset_link):
+    """Send password reset email via SMTP. Returns True on success, False on failure."""
+    server = app.config.get('MAIL_SERVER')
+    if not server:
+        return False
+    port = app.config.get('MAIL_PORT', 587)
+    use_tls = app.config.get('MAIL_USE_TLS', True)
+    username = app.config.get('MAIL_USERNAME')
+    password = app.config.get('MAIL_PASSWORD')
+    sender = app.config.get('MAIL_DEFAULT_SENDER') or username or 'noreply@localhost'
+    subject = 'Reset your password'
+    body = f'''Someone requested a password reset for your account.
+
+Click the link below to set a new password (link expires in 1 hour):
+
+{reset_link}
+
+If you didn't request this, you can ignore this email.
+'''
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = to_email
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        with smtplib.SMTP(server, port) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username and password:
+                smtp.login(username, password)
+            smtp.sendmail(sender, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"Failed to send password reset email: {e}")
+        return False
+
 
 # Note: Renamed Predictions Resource class to avoid conflict with model
 # The endpoint /api/v1/predictions uses the PredictionsResource class below
@@ -1302,16 +1357,31 @@ class Games(Resource):
     
 @app.route('/api/v1/authorized')
 def authorized():
-    try:
-        user = User.query.filter_by(id=get_current_user_id()).first()
-        return make_response(user.to_dict(), 200)
-    except:
+    user = get_active_user_by_id(get_current_user_id())
+    if not user:
         return make_response({"error": "User not found"}, 404)
+    return make_response(user.to_dict(), 200)
     
 @app.route('/api/v1/logout', methods=['DELETE'])
 def logout():
     session['user_id'] = None
     return make_response('', 204)
+
+
+@app.route('/api/v1/users/me', methods=['DELETE'])
+def soft_delete_current_user():
+    """Soft-delete the current user (set deleted_at). They can no longer log in or use the app."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return make_response({'error': 'User not authenticated'}, 401)
+    user = get_active_user_by_id(user_id)
+    if not user:
+        return make_response({'error': 'User not found'}, 404)
+    user.deleted_at = datetime.now(timezone.utc)
+    db.session.commit()
+    session['user_id'] = None
+    return make_response({'message': 'Account deleted.'}, 200)
+
 
 @app.route('/api/v1/login', methods=['POST'])
 def login():
@@ -1321,7 +1391,7 @@ def login():
         password = data.get('password')
         if not email or not password:
             return make_response({'error': 'Email and password are required'}, 400)
-        user = User.query.filter_by(email=email).first()
+        user = get_active_user_by_email(email)
         if user and user.authenticate(password):
             session['user_id'] = user.id
             token = generate_token(user.id)
@@ -1337,23 +1407,25 @@ def login():
 
 @app.route('/api/v1/forgot-password', methods=['POST'])
 def forgot_password():
-    """Request a password reset link. Always returns 200 to avoid email enumeration."""
+    """Request a password reset link. Sends email if MAIL_* is configured; else returns link in response."""
     data = request.get_json() or {}
     email = (data.get('email') or '').strip()
     if not email:
         return make_response({'error': 'Email is required'}, 400)
-    frontend_url = (data.get('frontend_url') or '').strip() or os.getenv('RESET_PASSWORD_BASE_URL', '')
-    user = User.query.filter_by(email=email).first()
+    frontend_url = (data.get('frontend_url') or '').strip() or app.config.get('RESET_PASSWORD_BASE_URL', '')
+    user = get_active_user_by_email(email)
     if user:
         user.reset_token = secrets.token_urlsafe(32)
         user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         db.session.commit()
-        # HashRouter uses #/path; build link so client can open it
         reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
-        return make_response({
-            'message': "If an account exists with that email, we've sent a reset link.",
-            'reset_link': reset_link,
-        }, 200)
+        email_sent = False
+        if app.config.get('MAIL_SERVER') and reset_link:
+            email_sent = send_password_reset_email(user.email, reset_link)
+        payload = {'message': "If an account exists with that email, we've sent a reset link."}
+        if not email_sent and reset_link:
+            payload['reset_link'] = reset_link
+        return make_response(payload, 200)
     return make_response({
         'message': "If an account exists with that email, we've sent a reset link.",
     }, 200)
@@ -1377,6 +1449,7 @@ def reset_password():
         User.reset_token == token,
         User.reset_token_expires.isnot(None),
         User.reset_token_expires > now,
+        User.deleted_at.is_(None),
     ).first()
     if not user:
         return make_response({'error': 'Invalid or expired reset link. Please request a new one.'}, 400)
@@ -1399,7 +1472,7 @@ def get_user_leagues():
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
-        user = User.query.get(user_id)
+        user = get_active_user_by_id(user_id)
         if not user:
             return make_response({'error': 'User not found'}, 404)
         
@@ -1533,9 +1606,9 @@ def get_league_leaderboard(league_id):
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
-        # Check if user is a member
-        user = User.query.get(user_id)
-        if user not in league.members:
+        # Check if user is a member (and not soft-deleted)
+        user = get_active_user_by_id(user_id)
+        if not user or user not in league.members:
             return make_response({'error': 'User is not a member of this league'}, 403)
         
         # Helper: compute Win/Draw/Loss from predicted vs actual scores (same logic as check-results)
@@ -1566,10 +1639,12 @@ def get_league_leaderboard(league_id):
                     return f
             return None
 
-        # Calculate points per member using LeagueMembership for display_name
+        # Calculate points per member using LeagueMembership for display_name (exclude soft-deleted users)
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
+            if member.deleted_at:
+                continue
             games = Game.query.filter_by(user_id=member.id).all()
             wins = 0
             draws = 0

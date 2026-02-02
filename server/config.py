@@ -79,3 +79,12 @@ CORS(app,
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization'])
 
+# Email (for password reset). Set MAIL_SERVER to enable sending.
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', '')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', '587'))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() in ('1', 'true', 'yes')
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', '')  # e.g. "Fantasy Predictor <noreply@example.com>"
+# Base URL for reset link in email (your frontend). e.g. https://your-app.vercel.app
+app.config['RESET_PASSWORD_BASE_URL'] = os.getenv('RESET_PASSWORD_BASE_URL', '')

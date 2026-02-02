@@ -23,7 +23,7 @@ class LeagueMembership(db.Model, SerializerMixin):
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
 
-    serialize_rules = ('-password_hash', '-reset_token', '-reset_token_expires',)
+    serialize_rules = ('-password_hash', '-reset_token', '-reset_token_expires', '-deleted_at',)
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=True)  # optional; league display_name used per league
@@ -31,6 +31,7 @@ class User(db.Model, SerializerMixin):
     _password_hash = db.Column(db.String)
     reset_token = db.Column(db.String, nullable=True)
     reset_token_expires = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)  # soft delete: when set, user is treated as deleted
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 

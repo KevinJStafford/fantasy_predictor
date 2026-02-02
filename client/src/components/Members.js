@@ -541,7 +541,7 @@ function Members() {
                                             <Chip label={`D: ${draws}`} color="warning" size="small" />
                                             <Chip label={`L: ${losses}`} color="error" size="small" />
                                         </Box>
-                                        <Box sx={{ maxHeight: '40vh', overflowY: 'auto' }}>
+                                        <Box>
                                             {completedPredictions.map((prediction) => {
                                                 const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
                                                 let resultColor = 'default'
