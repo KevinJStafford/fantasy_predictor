@@ -138,14 +138,23 @@ except ImportError:
 class Users(Resource):
     def post(self):
         try:
-            data = request.get_json()
-            # Handle empty email - make it None if empty string
-            email = data.get('email') if data.get('email') and data.get('email').strip() else None
-            user = User(username=data['username'], email=email, password_hash=data['password'])
+            data = request.get_json() or {}
+            email = (data.get('email') or '').strip()
+            password = data.get('password')
+            confirm_password = data.get('confirm_password')
+            if not email:
+                return make_response({'error': 'Email is required'}, 400)
+            if not password:
+                return make_response({'error': 'Password is required'}, 400)
+            if password != confirm_password:
+                return make_response({'error': 'Password and confirmation do not match'}, 400)
+            if get_active_user_by_email(email):
+                return make_response({'error': 'An account with this email already exists'}, 400)
+            user = User(email=email)
+            user.password_hash = password
             db.session.add(user)
             db.session.commit()
             session['user_id'] = user.id
-            # Generate JWT token for cross-domain auth
             token = generate_token(user.id)
             return make_response({
                 'user': user.to_dict(),
@@ -153,7 +162,6 @@ class Users(Resource):
             }, 201)
         except Exception as e:
             db.session.rollback()
-            # Print error to console for debugging
             print(f"Error creating user: {str(e)}")
             return make_response({'error': str(e)}, 500)
     
