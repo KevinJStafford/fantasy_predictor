@@ -1712,6 +1712,51 @@ def admin_update_prediction(league_id, game_id):
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/leagues/<int:league_id>/members/<int:member_user_id>/predictions', methods=['GET'])
+def get_member_predictions_for_admin(league_id, member_user_id):
+    """Get predictions for a league member. Admin only. Same shape as GET /api/v1/predictions."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can view member predictions'}, 403)
+        if not get_league_membership(member_user_id, league_id):
+            return make_response({'error': 'User is not a member of this league'}, 404)
+        user_games = Game.query.filter_by(user_id=member_user_id).order_by(Game.game_week.asc()).all()
+        predictions = []
+        for game in user_games:
+            fixture = Fixture.query.filter_by(
+                fixture_home_team=game.home_team,
+                fixture_away_team=game.away_team
+            ).first()
+            if not fixture and game.home_team and game.away_team:
+                for f in Fixture.query.all():
+                    if (f.fixture_home_team or '').lower().strip() == (game.home_team or '').lower().strip() and (f.fixture_away_team or '').lower().strip() == (game.away_team or '').lower().strip():
+                        fixture = f
+                        break
+            prediction_data = game.to_dict()
+            if fixture:
+                prediction_data['fixture'] = {
+                    'id': fixture.id,
+                    'round': fixture.fixture_round,
+                    'date': fixture.fixture_date.isoformat() if fixture.fixture_date else None,
+                    'is_completed': fixture.is_completed,
+                    'actual_home_score': fixture.actual_home_score,
+                    'actual_away_score': fixture.actual_away_score,
+                }
+            else:
+                prediction_data['fixture'] = None
+            prediction_data['game_result'] = game.game_result
+            predictions.append(prediction_data)
+        return make_response({'predictions': predictions}, 200)
+    except Exception as e:
+        print(f"Error fetching member predictions: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
 def get_league_leaderboard(league_id):
     """Get leaderboard for a league - players ordered by points"""

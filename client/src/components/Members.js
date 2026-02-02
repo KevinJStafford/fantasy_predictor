@@ -3,7 +3,11 @@ import Navbar from './Navbar'
 import Predictions from './Predictions'
 import {useEffect, useState} from 'react'
 import { useLocation, useHistory } from 'react-router-dom'
-import { Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material'
+import {
+    Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
+    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel
+} from '@mui/material'
+import EditIcon from '@mui/icons-material/Edit'
 import { apiUrl, authenticatedFetch } from '../utils/api'
 
 
@@ -21,6 +25,18 @@ function Members() {
     const [loadingFixtures, setLoadingFixtures] = useState(false)
     const [predictions, setPredictions] = useState([])
     const [loadingPredictions, setLoadingPredictions] = useState(false)
+    // Admin: current user and league with members/roles
+    const [currentUser, setCurrentUser] = useState(null)
+    const [leagueDetail, setLeagueDetail] = useState(null)
+    const [deleteLeagueDialog, setDeleteLeagueDialog] = useState(false)
+    const [removingMemberId, setRemovingMemberId] = useState(null)
+    const [adminMemberPredictions, setAdminMemberPredictions] = useState([])
+    const [adminSelectedMemberId, setAdminSelectedMemberId] = useState('')
+    const [loadingMemberPredictions, setLoadingMemberPredictions] = useState(false)
+    const [editPredictionDialog, setEditPredictionDialog] = useState(null) // { gameId, home_team, away_team, home_team_score, away_team_score }
+
+    const isAdmin = leagueDetail?.members?.some(m => m.id === currentUser?.id && m.role === 'admin') ?? false
+    const leagueMembers = leagueDetail?.members ?? []
 
     // Get league_id from URL query params
     useEffect(() => {
@@ -29,16 +45,29 @@ function Members() {
         if (leagueParam && !Number.isNaN(parseInt(leagueParam, 10))) {
             setLeagueId(parseInt(leagueParam, 10))
         } else {
-            // Don't hard-redirect on refresh; render a fallback UI instead.
             setLeagueId(null)
         }
     }, [location.search, history])
 
-    // Fetch leaderboard when league_id is set
+    // Fetch current user
     useEffect(() => {
-        if (leagueId) {
-            fetchLeaderboard()
-        }
+        authenticatedFetch('/api/v1/authorized')
+            .then(res => res.ok ? res.json() : null)
+            .then(user => setCurrentUser(user))
+            .catch(() => setCurrentUser(null))
+    }, [])
+
+    // Fetch leagues (to get league detail with members/roles) and leaderboard when league_id is set
+    useEffect(() => {
+        if (!leagueId) return
+        authenticatedFetch('/api/v1/leagues')
+            .then(res => res.ok ? res.json() : { leagues: [] })
+            .then(data => {
+                const league = (data.leagues || []).find(l => l.id === leagueId)
+                setLeagueDetail(league || null)
+            })
+            .catch(() => setLeagueDetail(null))
+        fetchLeaderboard()
     }, [leagueId])
 
     function getAvailableRounds() {
@@ -221,6 +250,88 @@ function Members() {
             })
     }
 
+    function refreshLeagueDetail() {
+        if (!leagueId) return
+        authenticatedFetch('/api/v1/leagues')
+            .then(res => res.ok ? res.json() : { leagues: [] })
+            .then(data => {
+                const league = (data.leagues || []).find(l => l.id === leagueId)
+                setLeagueDetail(league || null)
+            })
+            .catch(() => setLeagueDetail(null))
+        fetchLeaderboard()
+    }
+
+    function handleDeleteLeague() {
+        if (!leagueId) return
+        authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
+            .then(res => {
+                if (res.ok) {
+                    setDeleteLeagueDialog(false)
+                    history.push('/leagues')
+                } else {
+                    return res.json().then(data => { throw new Error(data.error || 'Failed to delete league') })
+                }
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to delete league' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+    }
+
+    function handleRemoveMember(memberUserId) {
+        if (!leagueId) return
+        setRemovingMemberId(memberUserId)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/members/${memberUserId}`, { method: 'DELETE' })
+            .then(res => {
+                if (res.ok) {
+                    refreshLeagueDetail()
+                } else {
+                    return res.json().then(data => { throw new Error(data.error || 'Failed to remove member') })
+                }
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to remove member' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+            .finally(() => setRemovingMemberId(null))
+    }
+
+    function handleFetchMemberPredictions(memberUserId) {
+        if (!leagueId || !memberUserId) return
+        setLoadingMemberPredictions(true)
+        setAdminMemberPredictions([])
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/members/${memberUserId}/predictions`)
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to load predictions')
+                return res.json()
+            })
+            .then(data => {
+                setAdminMemberPredictions(data.predictions || [])
+            })
+            .catch(() => setAdminMemberPredictions([]))
+            .finally(() => setLoadingMemberPredictions(false))
+    }
+
+    function handleAdminUpdatePrediction(gameId, home_team_score, away_team_score) {
+        if (!leagueId || gameId == null) return
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/games/${gameId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ home_team_score: Number(home_team_score), away_team_score: Number(away_team_score) })
+        })
+            .then(res => {
+                if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to update') })
+                setEditPredictionDialog(null)
+                handleFetchMemberPredictions(adminSelectedMemberId)
+                fetchLeaderboard()
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to update prediction' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+    }
+
     // Load available rounds and predictions on mount
     useEffect(() => {
         getAvailableRounds()
@@ -249,15 +360,26 @@ function Members() {
         <>
         <Navbar />
         <Box component="div" sx={{ px: 2, pr: { xs: 2, sm: 3, md: 4 } }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Button 
-                variant="outlined" 
-                color="primary"
-                onClick={() => history.push('/leagues')}
-                sx={{ mr: 2 }}
-            >
-                ← Back to Leagues
-            </Button>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Button 
+                    variant="outlined" 
+                    color="primary"
+                    onClick={() => history.push('/leagues')}
+                >
+                    ← Back to Leagues
+                </Button>
+                {isAdmin && (
+                    <Button
+                        variant="outlined"
+                        color="error"
+                        size="small"
+                        onClick={() => setDeleteLeagueDialog(true)}
+                    >
+                        Delete league
+                    </Button>
+                )}
+            </Box>
             <Typography variant="h5" component="h2"><span>Select Game Week:</span></Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button 
@@ -468,6 +590,112 @@ function Members() {
                         )}
                     </Box>
 
+                    {/* League members (admin: remove) */}
+                    {isAdmin && leagueMembers.length > 0 && (
+                        <Box sx={{ mb: 3 }}>
+                            <Typography variant="h6" component="h3" sx={{ mb: 1 }}>League members</Typography>
+                            <TableContainer component={Paper} variant="outlined">
+                                <Table size="small">
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell><strong>Name</strong></TableCell>
+                                            <TableCell><strong>Role</strong></TableCell>
+                                            <TableCell align="right"><strong>Actions</strong></TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {leagueMembers.map((m) => (
+                                            <TableRow key={m.id}>
+                                                <TableCell>{m.display_name}</TableCell>
+                                                <TableCell>
+                                                    <Chip label={m.role} size="small" color={m.role === 'admin' ? 'primary' : 'default'} />
+                                                </TableCell>
+                                                <TableCell align="right">
+                                                    {m.id !== currentUser?.id && (
+                                                        <Button
+                                                            size="small"
+                                                            color="error"
+                                                            variant="outlined"
+                                                            disabled={removingMemberId === m.id}
+                                                            onClick={() => window.confirm(`Remove ${m.display_name} from the league?`) && handleRemoveMember(m.id)}
+                                                        >
+                                                            {removingMemberId === m.id ? 'Removing...' : 'Remove'}
+                                                        </Button>
+                                                    )}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Box>
+                    )}
+
+                    {/* Admin: Edit member prediction */}
+                    {isAdmin && leagueMembers.length > 0 && (
+                        <Box sx={{ mb: 3 }}>
+                            <Typography variant="h6" component="h3" sx={{ mb: 1 }}>Admin: Edit member prediction</Typography>
+                            <FormControl size="small" sx={{ minWidth: 200, mb: 2 }}>
+                                <InputLabel>Select member</InputLabel>
+                                <Select
+                                    value={adminSelectedMemberId}
+                                    label="Select member"
+                                    onChange={(e) => {
+                                        const id = e.target.value
+                                        setAdminSelectedMemberId(id)
+                                        if (id) handleFetchMemberPredictions(Number(id))
+                                        else setAdminMemberPredictions([])
+                                    }}
+                                >
+                                    <MenuItem value="">—</MenuItem>
+                                    {leagueMembers.map((m) => (
+                                        <MenuItem key={m.id} value={String(m.id)}>{m.display_name}</MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            {loadingMemberPredictions ? (
+                                <Typography variant="body2">Loading predictions...</Typography>
+                            ) : adminMemberPredictions.length > 0 ? (
+                                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 280, overflow: 'auto' }}>
+                                    <Table size="small" stickyHeader>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>Match</TableCell>
+                                                <TableCell align="center">Pred</TableCell>
+                                                <TableCell align="right">Edit</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {adminMemberPredictions.map((pred) => (
+                                                <TableRow key={pred.id}>
+                                                    <TableCell>{pred.home_team} vs {pred.away_team}</TableCell>
+                                                    <TableCell align="center">{pred.home_team_score ?? '–'}–{pred.away_team_score ?? '–'}</TableCell>
+                                                    <TableCell align="right">
+                                                        <IconButton
+                                                            size="small"
+                                                            aria-label="Edit prediction"
+                                                            onClick={() => setEditPredictionDialog({
+                                                                gameId: pred.id,
+                                                                home_team: pred.home_team,
+                                                                away_team: pred.away_team,
+                                                                home_team_score: pred.home_team_score ?? 0,
+                                                                away_team_score: pred.away_team_score ?? 0
+                                                            })}
+                                                        >
+                                                            <EditIcon fontSize="small" />
+                                                        </IconButton>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            ) : adminSelectedMemberId ? (
+                                <Typography variant="body2" color="text.secondary">No predictions yet.</Typography>
+                            ) : null}
+                        </Box>
+                    )}
+
                     {/* Results Section for Selected Week (below leaderboard) */}
                     {gameWeek && (
                         <Box sx={{ mt: 3 }}>
@@ -575,6 +803,61 @@ function Members() {
                 </Box>
             </Grid>
         </Grid>
+
+        {/* Delete league confirmation */}
+        <Dialog open={deleteLeagueDialog} onClose={() => setDeleteLeagueDialog(false)}>
+            <DialogTitle>Delete league?</DialogTitle>
+            <DialogContent>
+                <Typography>This will remove the league and all members. This cannot be undone.</Typography>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setDeleteLeagueDialog(false)}>Cancel</Button>
+                <Button color="error" variant="contained" onClick={handleDeleteLeague}>Delete league</Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Edit prediction (admin) */}
+        <Dialog open={!!editPredictionDialog} onClose={() => setEditPredictionDialog(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>Edit prediction</DialogTitle>
+            {editPredictionDialog && (
+                <>
+                    <DialogContent>
+                        <Typography variant="body2" sx={{ mb: 2 }}>{editPredictionDialog.home_team} vs {editPredictionDialog.away_team}</Typography>
+                        <TextField
+                            label="Home score"
+                            type="number"
+                            inputProps={{ min: 0 }}
+                            value={editPredictionDialog.home_team_score}
+                            onChange={(e) => setEditPredictionDialog(prev => ({ ...prev, home_team_score: e.target.value }))}
+                            fullWidth
+                            sx={{ mb: 2 }}
+                        />
+                        <TextField
+                            label="Away score"
+                            type="number"
+                            inputProps={{ min: 0 }}
+                            value={editPredictionDialog.away_team_score}
+                            onChange={(e) => setEditPredictionDialog(prev => ({ ...prev, away_team_score: e.target.value }))}
+                            fullWidth
+                        />
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setEditPredictionDialog(null)}>Cancel</Button>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            onClick={() => handleAdminUpdatePrediction(
+                                editPredictionDialog.gameId,
+                                editPredictionDialog.home_team_score,
+                                editPredictionDialog.away_team_score
+                            )}
+                        >
+                            Save
+                        </Button>
+                    </DialogActions>
+                </>
+            )}
+        </Dialog>
         </Box>
         </>
       );
