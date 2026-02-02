@@ -35,7 +35,7 @@ function Members() {
     const [loadingMemberPredictions, setLoadingMemberPredictions] = useState(false)
     const [editPredictionDialog, setEditPredictionDialog] = useState(null) // { gameId, home_team, away_team, home_team_score, away_team_score }
 
-    const isAdmin = leagueDetail?.members?.some(m => m.id === currentUser?.id && m.role === 'admin') ?? false
+    const isAdmin = leagueDetail?.members?.some(m => Number(m.id) === Number(currentUser?.id) && m.role === 'admin') ?? false
     const leagueMembers = leagueDetail?.members ?? []
 
     // Get league_id from URL query params
@@ -611,7 +611,7 @@ function Members() {
                                                     <Chip label={m.role} size="small" color={m.role === 'admin' ? 'primary' : 'default'} />
                                                 </TableCell>
                                                 <TableCell align="right">
-                                                    {m.id !== currentUser?.id && (
+                                                    {Number(m.id) !== Number(currentUser?.id) && (
                                                         <Button
                                                             size="small"
                                                             color="error"

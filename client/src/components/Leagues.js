@@ -9,6 +9,7 @@ function Leagues() {
     const [leagues, setLeagues] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [currentUser, setCurrentUser] = useState(null)
     const [joinDialogOpen, setJoinDialogOpen] = useState(false)
     const [inviteCode, setInviteCode] = useState('')
     const [joinDisplayName, setJoinDisplayName] = useState('')
@@ -17,6 +18,13 @@ function Leagues() {
 
     useEffect(() => {
         fetchLeagues()
+    }, [])
+
+    useEffect(() => {
+        authenticatedFetch('/api/v1/authorized')
+            .then(res => (res.ok ? res.json() : null))
+            .then(user => setCurrentUser(user))
+            .catch(() => setCurrentUser(null))
     }, [])
 
     function fetchLeagues() {
@@ -91,10 +99,17 @@ function Leagues() {
         <>
             <Navbar />
             <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h4" component="h1">
-                        My Leagues
-                    </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+                    <Box>
+                        <Typography variant="h4" component="h1">
+                            My Leagues
+                        </Typography>
+                        {currentUser?.email && (
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                Signed in as {currentUser.email}
+                            </Typography>
+                        )}
+                    </Box>
                     <Button 
                         variant="outlined" 
                         color="primary"
