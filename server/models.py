@@ -6,12 +6,13 @@ from config import db, bcrypt
 # Models go here!
 
 class LeagueMembership(db.Model, SerializerMixin):
-    """Association: user in a league with a display name unique per league."""
+    """Association: user in a league with display name and role (admin vs player)."""
     __tablename__ = 'league_memberships'
 
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
     league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), primary_key=True)
     display_name = db.Column(db.String, nullable=False)  # unique per league
+    role = db.Column(db.String, nullable=False, default='player')  # 'admin' | 'player'
     joined_at = db.Column(db.DateTime, server_default=db.func.now())
 
     __table_args__ = (db.UniqueConstraint('league_id', 'display_name', name='uq_league_display_name'),)
@@ -132,6 +133,7 @@ class League(db.Model, SerializerMixin):
                     'id': lm.user.id,
                     'display_name': lm.display_name,
                     'email': lm.user.email,
+                    'role': lm.role,
                     'created_at': lm.user.created_at.isoformat() if lm.user.created_at else None,
                 }
                 for lm in self.league_memberships

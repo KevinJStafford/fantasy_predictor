@@ -68,6 +68,19 @@ def get_active_user_by_email(email):
     return User.query.filter(User.email == email.strip(), User.deleted_at.is_(None)).first()
 
 
+def get_league_membership(user_id, league_id):
+    """Return LeagueMembership for (user_id, league_id) or None."""
+    if not user_id or not league_id:
+        return None
+    return LeagueMembership.query.filter_by(user_id=user_id, league_id=league_id).first()
+
+
+def is_league_admin(user_id, league_id):
+    """Return True if user is an admin of the league."""
+    m = get_league_membership(user_id, league_id)
+    return m is not None and m.role == 'admin'
+
+
 def send_password_reset_email(to_email, reset_link):
     """Send password reset email via SMTP. Returns True on success, False on failure."""
     server = app.config.get('MAIL_SERVER')
@@ -1512,7 +1525,7 @@ def create_league():
         db.session.add(league)
         db.session.flush()
         
-        membership = LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name)
+        membership = LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name, role='admin')
         db.session.add(membership)
         db.session.commit()
         
@@ -1546,7 +1559,7 @@ def join_league(league_id):
         if LeagueMembership.query.filter_by(league_id=league_id, display_name=display_name).first():
             return make_response({'error': 'That display name is already taken in this league'}, 400)
         
-        db.session.add(LeagueMembership(user_id=user_id, league_id=league_id, display_name=display_name))
+        db.session.add(LeagueMembership(user_id=user_id, league_id=league_id, display_name=display_name, role='player'))
         db.session.commit()
         league = League.query.get(league_id)
         return make_response({'league': league.to_dict()}, 200)
@@ -1583,7 +1596,7 @@ def join_league_by_code():
         if LeagueMembership.query.filter_by(league_id=league.id, display_name=display_name).first():
             return make_response({'error': 'That display name is already taken in this league'}, 400)
         
-        db.session.add(LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name))
+        db.session.add(LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name, role='player'))
         db.session.commit()
         league = League.query.get(league.id)
         return make_response({'league': league.to_dict()}, 200)
@@ -1593,6 +1606,111 @@ def join_league_by_code():
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/members/<int:member_user_id>', methods=['DELETE'])
+def remove_league_member(league_id, member_user_id):
+    """Remove a member from the league. Admin only."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can remove members'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        membership = get_league_membership(member_user_id, league_id)
+        if not membership:
+            return make_response({'error': 'Member not in this league'}, 404)
+        db.session.delete(membership)
+        db.session.commit()
+        return make_response({'message': 'Member removed from league'}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error removing member: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>', methods=['DELETE'])
+def delete_league(league_id):
+    """Delete the league entirely. Admin only. Removes all league memberships."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can delete the league'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        LeagueMembership.query.filter_by(league_id=league_id).delete()
+        db.session.delete(league)
+        db.session.commit()
+        return make_response({'message': 'League deleted'}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting league: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/games/<int:game_id>', methods=['PATCH'])
+def admin_update_prediction(league_id, game_id):
+    """Manually update a prediction (home_team_score, away_team_score). Admin of the league only. Game must belong to a league member."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can update predictions'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        game = Game.query.get(game_id)
+        if not game:
+            return make_response({'error': 'Prediction/game not found'}, 404)
+        # Game must belong to a member of this league
+        if not get_league_membership(game.user_id, league_id):
+            return make_response({'error': 'That prediction is not from a member of this league'}, 403)
+        data = request.get_json() or {}
+        home_team_score = data.get('home_team_score')
+        away_team_score = data.get('away_team_score')
+        if home_team_score is not None:
+            game.home_team_score = int(home_team_score)
+        if away_team_score is not None:
+            game.away_team_score = int(away_team_score)
+        # Recompute game_result if fixture is completed
+        fixture = Fixture.query.filter_by(
+            fixture_home_team=game.home_team,
+            fixture_away_team=game.away_team
+        ).first()
+        if not fixture and game.home_team and game.away_team:
+            for f in Fixture.query.all():
+                if (f.fixture_home_team or '').lower().strip() == (game.home_team or '').lower().strip() and (f.fixture_away_team or '').lower().strip() == (game.away_team or '').lower().strip():
+                    fixture = f
+                    break
+        if fixture and fixture.is_completed and fixture.actual_home_score is not None and fixture.actual_away_score is not None:
+            pred_home, pred_away = game.home_team_score, game.away_team_score
+            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
+            if pred_home == actual_home and pred_away == actual_away:
+                game.game_result = 'Win'
+            else:
+                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+        db.session.commit()
+        return make_response({'message': 'Prediction updated', 'game': game.to_dict()}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating prediction: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
 
 @app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
 def get_league_leaderboard(league_id):
