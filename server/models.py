@@ -45,14 +45,22 @@ class User(db.Model, SerializerMixin):
     
     @password_hash.setter
     def password_hash(self, plain_text_password):
-        byte_object = plain_text_password.encode('utf-8')
-        encrypted_password_object = bcrypt.generate_password_hash(byte_object)
-        hashed_password_string = encrypted_password_object.decode('utf-8')
-        self._password_hash = hashed_password_string
+        if plain_text_password is None:
+            self._password_hash = None
+            return
+        p = str(plain_text_password)
+        # Flask-Bcrypt in Python 3: decode hash to utf-8 before storing
+        encrypted = bcrypt.generate_password_hash(p)
+        self._password_hash = encrypted.decode('utf-8') if isinstance(encrypted, bytes) else encrypted
         
     def authenticate(self, password_string):
-        byte_object = password_string.encode('utf-8')
-        return bcrypt.check_password_hash(self._password_hash, byte_object)
+        if not self._password_hash:
+            return False
+        if password_string is None:
+            return False
+        # Flask-Bcrypt accepts str or bytes; use string for consistent behavior
+        p = str(password_string)
+        return bcrypt.check_password_hash(self._password_hash, p)
     
     def __repr__(self):
         return f'<User {self.id}: {self.username}>'

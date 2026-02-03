@@ -18,6 +18,7 @@ from flask_restful import Resource
 from config import app, db, api
 # Add your model imports
 from models import User, Game, Prediction, Fixture, League, LeagueMembership
+from sqlalchemy import func
 
 # JWT token helper functions
 def generate_token(user_id):
@@ -62,10 +63,12 @@ def get_active_user_by_id(user_id):
 
 
 def get_active_user_by_email(email):
-    """Return the User with the given email if they exist and are not soft-deleted; else None."""
-    if not email or not email.strip():
+    """Return the User with the given email if they exist and are not soft-deleted; else None.
+    Comparison is case-insensitive so Login and Signup match regardless of casing."""
+    if not email or not str(email).strip():
         return None
-    return User.query.filter(User.email == email.strip(), User.deleted_at.is_(None)).first()
+    normalized = str(email).strip().lower()
+    return User.query.filter(func.lower(User.email) == normalized, User.deleted_at.is_(None)).first()
 
 
 def get_active_user_by_username(username):
@@ -146,19 +149,20 @@ class Users(Resource):
     def post(self):
         try:
             data = request.get_json() or {}
-            email = (data.get('email') or '').strip()
+            raw_email = (data.get('email') or '').strip()
+            email = raw_email.lower() if raw_email else ''
             password = data.get('password')
             confirm_password = data.get('confirm_password')
             if not email:
                 return make_response({'error': 'Email is required'}, 400)
-            if not password:
+            if password is None or (isinstance(password, str) and not password.strip()):
                 return make_response({'error': 'Password is required'}, 400)
-            if password != confirm_password:
+            if str(password) != str(confirm_password):
                 return make_response({'error': 'Password and confirmation do not match'}, 400)
             if get_active_user_by_email(email):
                 return make_response({'error': 'An account with this email already exists'}, 400)
             user = User(email=email)
-            user.password_hash = password
+            user.password_hash = str(password)
             db.session.add(user)
             db.session.commit()
             session['user_id'] = user.id
@@ -1418,13 +1422,13 @@ def login():
         email = (data.get('email') or '').strip()
         username = (data.get('username') or '').strip()
         password = data.get('password')
-        if not password:
+        if password is None or (isinstance(password, str) and not password.strip()):
             return make_response({'error': 'Email and password are required'}, 400)
         # Prefer email (primary); fall back to username for backwards compatibility
         user = get_active_user_by_email(email) if email else get_active_user_by_username(username)
         if not user and not email and not username:
             return make_response({'error': 'Email and password are required'}, 400)
-        if user and user.authenticate(password):
+        if user and user.authenticate(str(password) if password is not None else ''):
             session['user_id'] = user.id
             token = generate_token(user.id)
             return make_response({
