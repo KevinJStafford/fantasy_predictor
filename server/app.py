@@ -68,6 +68,13 @@ def get_active_user_by_email(email):
     return User.query.filter(User.email == email.strip(), User.deleted_at.is_(None)).first()
 
 
+def get_active_user_by_username(username):
+    """Return the User with the given username if they exist and are not soft-deleted; else None."""
+    if not username or not str(username).strip():
+        return None
+    return User.query.filter(User.username == username.strip(), User.username.isnot(None), User.deleted_at.is_(None)).first()
+
+
 def get_league_membership(user_id, league_id):
     """Return LeagueMembership for (user_id, league_id) or None."""
     if not user_id or not league_id:
@@ -1406,13 +1413,17 @@ def soft_delete_current_user():
 
 @app.route('/api/v1/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    data = request.get_json() or {}
     try:
         email = (data.get('email') or '').strip()
+        username = (data.get('username') or '').strip()
         password = data.get('password')
-        if not email or not password:
+        if not password:
             return make_response({'error': 'Email and password are required'}, 400)
-        user = get_active_user_by_email(email)
+        # Prefer email (primary); fall back to username for backwards compatibility
+        user = get_active_user_by_email(email) if email else get_active_user_by_username(username)
+        if not user and not email and not username:
+            return make_response({'error': 'Email and password are required'}, 400)
         if user and user.authenticate(password):
             session['user_id'] = user.id
             token = generate_token(user.id)
