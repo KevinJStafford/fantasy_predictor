@@ -73,11 +73,15 @@ if cors_origins:
 else:
     origins = ['*']
 
+# Store for after_request fallback (so error responses still get CORS)
+app.config['CORS_ORIGINS_LIST'] = origins
+
 CORS(app,
      origins=origins,
      supports_credentials=True,
      methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization'])
+     allow_headers=['Content-Type', 'Authorization'],
+     intercept_exceptions=True)  # Add CORS headers to 5xx/4xx responses too
 
 # Email (for password reset). Set MAIL_SERVER to enable sending.
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', '')

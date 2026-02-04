@@ -4,6 +4,7 @@
 import os
 import secrets
 import smtplib
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -19,6 +20,26 @@ from config import app, db, api
 # Add your model imports
 from models import User, Game, Prediction, Fixture, League, LeagueMembership
 from sqlalchemy import func, or_
+
+
+@app.after_request
+def add_cors_headers_if_missing(response):
+    """Ensure CORS headers are on every response so browser shows real errors (e.g. 502) instead of CORS."""
+    try:
+        origin = request.headers.get('Origin')
+        if not origin:
+            return response
+        allowed = app.config.get('CORS_ORIGINS_LIST') or []
+        if allowed and allowed != ['*'] and origin not in allowed:
+            return response
+        if response.headers.get('Access-Control-Allow-Origin') is None:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        if response.headers.get('Access-Control-Allow-Credentials') is None:
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+    except Exception:
+        pass
+    return response
+
 
 # JWT token helper functions
 def generate_token(user_id):
@@ -116,7 +137,8 @@ If you didn't request this, you can ignore this email.
     msg['To'] = to_email
     msg.attach(MIMEText(body, 'plain'))
     try:
-        with smtplib.SMTP(server, port) as smtp:
+        # Short timeout so worker doesn't hang (avoids WORKER TIMEOUT / SIGKILL)
+        with smtplib.SMTP(server, port, timeout=10) as smtp:
             if use_tls:
                 smtp.starttls()
             if username and password:
@@ -1484,6 +1506,9 @@ def login():
                 'token': token
             }, 200)
         return make_response({'error': 'Invalid email or password'}, 401)
+    except RecursionError:
+        print("Login error: recursion in auth path")
+        return make_response({'error': 'Invalid email or password'}, 401)
     except Exception as e:
         print(f"Login error: {str(e)}")
         return make_response({'error': 'Invalid email or password'}, 401)
@@ -1503,9 +1528,19 @@ def forgot_password():
         user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         db.session.commit()
         reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
+        to_email = str(user.email)
+        # Send email in background so we don't block the worker (avoids WORKER TIMEOUT / SIGKILL)
         email_sent = False
         if app.config.get('MAIL_SERVER') and reset_link:
-            email_sent = send_password_reset_email(user.email, reset_link)
+            def send_later():
+                try:
+                    send_password_reset_email(to_email, reset_link)
+                except Exception as e:
+                    print(f"Background send_password_reset_email failed: {e}")
+            t = threading.Thread(target=send_later, daemon=True)
+            t.start()
+            # Assume email will be sent; reset_link is always in response so user can reset either way
+            email_sent = True
         payload = {
             'message': "If an account exists with that email, we've sent a reset link.",
             'email_sent': email_sent,

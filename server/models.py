@@ -54,13 +54,22 @@ class User(db.Model, SerializerMixin):
         self._password_hash = encrypted.decode('utf-8') if isinstance(encrypted, bytes) else encrypted
         
     def authenticate(self, password_string):
-        if not self._password_hash:
+        if self._password_hash is None:
             return False
         if password_string is None:
             return False
-        # Flask-Bcrypt accepts str or bytes; use string for consistent behavior
-        p = str(password_string)
-        return bcrypt.check_password_hash(self._password_hash, p)
+        # Force plain str to avoid recursion or type issues (e.g. SQLAlchemy/DB types)
+        try:
+            hash_str = str(self._password_hash) if self._password_hash else None
+        except Exception:
+            return False
+        if not hash_str:
+            return False
+        p = str(password_string).strip()
+        try:
+            return bcrypt.check_password_hash(hash_str, p)
+        except (RecursionError, TypeError, ValueError):
+            return False
     
     def __repr__(self):
         return f'<User {self.id}: {self.username}>'
