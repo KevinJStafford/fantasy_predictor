@@ -18,7 +18,7 @@ from flask_restful import Resource
 from config import app, db, api
 # Add your model imports
 from models import User, Game, Prediction, Fixture, League, LeagueMembership
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 # JWT token helper functions
 def generate_token(user_id):
@@ -155,14 +155,16 @@ class Users(Resource):
             confirm_password = data.get('confirm_password')
             if not email:
                 return make_response({'error': 'Email is required'}, 400)
-            if password is None or (isinstance(password, str) and not password.strip()):
+            pw = (str(password) if password is not None else '').strip()
+            confirm_pw = (str(confirm_password) if confirm_password is not None else '').strip()
+            if not pw:
                 return make_response({'error': 'Password is required'}, 400)
-            if str(password) != str(confirm_password):
+            if pw != confirm_pw:
                 return make_response({'error': 'Password and confirmation do not match'}, 400)
             if get_active_user_by_email(email):
                 return make_response({'error': 'An account with this email already exists'}, 400)
             user = User(email=email)
-            user.password_hash = str(password)
+            user.password_hash = pw
             db.session.add(user)
             db.session.commit()
             session['user_id'] = user.id
@@ -271,27 +273,27 @@ def get_next_incomplete_round():
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the largest round that has NOT fully completed yet
-    (at least one fixture in that round has is_completed = False). E.g. GW 25 stays default until
-    GW 25's last game completes, then default becomes GW 26. If all rounds are complete, return
-    the latest round."""
+    (at least one fixture in that round has is_completed = False or NULL). E.g. GW 25 stays
+    default until GW 25's last game completes, then default becomes GW 26."""
     try:
-        # Largest round that has at least one fixture not yet completed
+        # Incomplete = not completed: is_completed is False or NULL (unplayed games)
         incomplete_rounds = (
             db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
-            .filter(Fixture.is_completed == False)
+            .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
             .distinct()
             .all()
         )
         if incomplete_rounds:
             try:
                 round_num = max(int(r[0]) for r in incomplete_rounds)
-                return make_response({'round': round_num}, 200)
             except (TypeError, ValueError):
                 round_num = max(r[0] for r in incomplete_rounds if r[0] is not None)
-                if round_num is not None:
-                    return make_response({'round': round_num}, 200)
-        # All fixtures complete: return latest round
+            if round_num is not None:
+                resp = make_response({'round': round_num}, 200)
+                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+                return resp
+        # All fixtures complete (or no fixtures): return latest round
         all_rounds = (
             db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
@@ -304,7 +306,9 @@ def get_current_round():
                 round_num = max(int(r[0]) for r in all_rounds)
             except (TypeError, ValueError):
                 round_num = max(r[0] for r in all_rounds if r[0] is not None)
-        return make_response({'round': round_num}, 200)
+        resp = make_response({'round': round_num}, 200)
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        return resp
     except Exception as e:
         import traceback
         print(f"Error in get_current_round: {str(e)}")
@@ -1472,7 +1476,7 @@ def login():
         user = get_active_user_by_email(email) if email else get_active_user_by_username(username)
         if not user and not email and not username:
             return make_response({'error': 'Email and password are required'}, 400)
-        if user and user.authenticate(str(password) if password is not None else ''):
+        if user and user.authenticate((str(password) if password is not None else '').strip()):
             session['user_id'] = user.id
             token = generate_token(user.id)
             return make_response({
@@ -1502,8 +1506,12 @@ def forgot_password():
         email_sent = False
         if app.config.get('MAIL_SERVER') and reset_link:
             email_sent = send_password_reset_email(user.email, reset_link)
-        payload = {'message': "If an account exists with that email, we've sent a reset link."}
-        if not email_sent and reset_link:
+        payload = {
+            'message': "If an account exists with that email, we've sent a reset link.",
+            'email_sent': email_sent,
+        }
+        # Always include reset_link when we have one so user can reset even if email didn't send
+        if reset_link:
             payload['reset_link'] = reset_link
         return make_response(payload, 200)
     return make_response({
