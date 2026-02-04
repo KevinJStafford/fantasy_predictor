@@ -58,12 +58,16 @@ class User(db.Model, SerializerMixin):
             return False
         if password_string is None:
             return False
-        # Force plain str to avoid recursion or type issues (e.g. SQLAlchemy/DB types)
+        # Normalize hash: DB may return str or bytes (e.g. PostgreSQL)
         try:
-            hash_str = str(self._password_hash) if self._password_hash else None
+            raw = self._password_hash
+            if isinstance(raw, bytes):
+                hash_str = raw.decode('utf-8')
+            else:
+                hash_str = str(raw) if raw else None
         except Exception:
             return False
-        if not hash_str:
+        if not hash_str or not hash_str.startswith('$2'):
             return False
         p = str(password_string).strip()
         try:

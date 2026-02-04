@@ -1503,13 +1503,20 @@ def login():
         user = get_active_user_by_email(email) if email else get_active_user_by_username(username)
         if not user and not email and not username:
             return make_response({'error': 'Email and password are required'}, 400)
-        if user and user.authenticate((str(password) if password is not None else '').strip()):
+        pw_clean = (str(password) if password is not None else '').strip()
+        if user and user.authenticate(pw_clean):
             session['user_id'] = user.id
             token = generate_token(user.id)
             return make_response({
                 'user': user.to_dict(),
                 'token': token
             }, 200)
+        # Debug: log hash length when auth fails (bcrypt hashes are 60 chars; truncated = wrong)
+        if user and user._password_hash is not None:
+            h = user._password_hash
+            length = len(h) if hasattr(h, '__len__') else -1
+            kind = type(h).__name__
+            print(f"Login failed: user_id={user.id} hash_type={kind} hash_len={length} (expected 60)")
         return make_response({'error': 'Invalid email or password'}, 401)
     except RecursionError:
         print("Login error: recursion in auth path")
