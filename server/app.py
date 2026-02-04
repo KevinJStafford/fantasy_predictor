@@ -116,6 +116,25 @@ def get_active_user_by_id(user_id):
     return User.query.filter(User.id == user_id, User.deleted_at.is_(None)).first()
 
 
+def get_active_user_id_by_email(email):
+    """Return user id for the given email (case-insensitive), or None. Does not load full User (avoids recursion)."""
+    if not email or not str(email).strip():
+        return None
+    normalized = str(email).strip().lower()
+    stmt = select(User.id).where(func.lower(User.email) == normalized, User.deleted_at.is_(None))
+    result = db.session.execute(stmt)
+    return result.scalar() if result else None
+
+
+def get_active_user_id_by_username(username):
+    """Return user id for the given username, or None. Does not load full User."""
+    if not username or not str(username).strip():
+        return None
+    stmt = select(User.id).where(User.username == username.strip(), User.username.isnot(None), User.deleted_at.is_(None))
+    result = db.session.execute(stmt)
+    return result.scalar() if result else None
+
+
 def get_active_user_by_email(email):
     """Return the User with the given email if they exist and are not soft-deleted; else None.
     Comparison is case-insensitive so Login and Signup match regardless of casing."""
@@ -1527,20 +1546,22 @@ def login():
         password = data.get('password')
         if password is None or (isinstance(password, str) and not password.strip()):
             return make_response({'error': 'Email and password are required'}, 400)
-        # Prefer email (primary); fall back to username for backwards compatibility
-        user = get_active_user_by_email(email) if email else get_active_user_by_username(username)
-        if not user and not email and not username:
+        # Resolve user by id only (no full User load) to avoid recursion from model access
+        user_id = get_active_user_id_by_email(email) if email else get_active_user_id_by_username(username)
+        if not user_id and not email and not username:
             return make_response({'error': 'Email and password are required'}, 400)
         pw_clean = (str(password) if password is not None else '').strip()
-        if user and _verify_password(user.id, pw_clean):
-            session['user_id'] = user.id
-            token = generate_token(user.id)
-            return make_response({
-                'user': user.to_dict(),
-                'token': token
-            }, 200)
-        if not user:
-            print("Login 401: no user found for email (check email spelling / case)")
+        if user_id and _verify_password(user_id, pw_clean):
+            user = get_active_user_by_id(user_id)
+            if user:
+                session['user_id'] = user.id
+                token = generate_token(user.id)
+                return make_response({
+                    'user': user.to_dict(),
+                    'token': token
+                }, 200)
+        if not user_id:
+            print("Login 401: no user found for email/username")
         return make_response({'error': 'Invalid email or password'}, 401)
     except RecursionError:
         print("Login error: recursion in auth path")
