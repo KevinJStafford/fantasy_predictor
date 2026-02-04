@@ -135,6 +135,30 @@ def get_active_user_id_by_username(username):
     return result.scalar() if result else None
 
 
+def get_user_dict_by_id(user_id):
+    """Return a plain dict of user fields for API (id, username, email, created_at, updated_at).
+    Uses a single column select per field so no User ORM instance is created (avoids recursion)."""
+    if not user_id:
+        return None
+    stmt = select(
+        User.id,
+        User.username,
+        User.email,
+        User.created_at,
+        User.updated_at,
+    ).where(User.id == user_id, User.deleted_at.is_(None))
+    row = db.session.execute(stmt).first()
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'username': row[1],
+        'email': row[2],
+        'created_at': row[3].isoformat() if row[3] else None,
+        'updated_at': row[4].isoformat() if row[4] else None,
+    }
+
+
 def get_active_user_by_email(email):
     """Return the User with the given email if they exist and are not soft-deleted; else None.
     Comparison is case-insensitive so Login and Signup match regardless of casing."""
@@ -1552,12 +1576,12 @@ def login():
             return make_response({'error': 'Email and password are required'}, 400)
         pw_clean = (str(password) if password is not None else '').strip()
         if user_id and _verify_password(user_id, pw_clean):
-            user = get_active_user_by_id(user_id)
-            if user:
-                session['user_id'] = user.id
-                token = generate_token(user.id)
+            user_dict = get_user_dict_by_id(user_id)
+            if user_dict:
+                session['user_id'] = user_id
+                token = generate_token(user_id)
                 return make_response({
-                    'user': user.to_dict(),
+                    'user': user_dict,
                     'token': token
                 }, 200)
         if not user_id:
