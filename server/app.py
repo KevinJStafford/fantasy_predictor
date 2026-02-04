@@ -270,26 +270,28 @@ def get_next_incomplete_round():
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
-    """Return the active game week: the most recent round that has at least one upcoming game
-    (fixture start time in the future, UTC). This is the default match week so users don't have to
-    remember the week number. If all fixtures are past, returns the latest round."""
+    """Return the default game week: the largest round that has NOT fully completed yet
+    (at least one fixture in that round has is_completed = False). E.g. GW 25 stays default until
+    GW 25's last game completes, then default becomes GW 26. If all rounds are complete, return
+    the latest round."""
     try:
-        now_utc = datetime.now(timezone.utc)
-        # Active week = largest round that has at least one fixture with start time in the future
-        future_round_row = (
+        # Largest round that has at least one fixture not yet completed
+        incomplete_rounds = (
             db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
-            .filter(Fixture.fixture_date.isnot(None))
-            .filter(Fixture.fixture_date > now_utc)
-            .order_by(Fixture.fixture_round.desc())
-            .first()
+            .filter(Fixture.is_completed == False)
+            .distinct()
+            .all()
         )
-        if future_round_row and future_round_row[0] is not None:
+        if incomplete_rounds:
             try:
-                return make_response({'round': int(future_round_row[0])}, 200)
+                round_num = max(int(r[0]) for r in incomplete_rounds)
+                return make_response({'round': round_num}, 200)
             except (TypeError, ValueError):
-                pass
-        # No future fixtures: return latest round (numerically) so user sees the current/last week
+                round_num = max(r[0] for r in incomplete_rounds if r[0] is not None)
+                if round_num is not None:
+                    return make_response({'round': round_num}, 200)
+        # All fixtures complete: return latest round
         all_rounds = (
             db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
@@ -299,7 +301,6 @@ def get_current_round():
         round_num = None
         if all_rounds:
             try:
-                # Cast to int so we get numeric max (handles string "24" vs "38" in DB)
                 round_num = max(int(r[0]) for r in all_rounds)
             except (TypeError, ValueError):
                 round_num = max(r[0] for r in all_rounds if r[0] is not None)
