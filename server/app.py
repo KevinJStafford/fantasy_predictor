@@ -424,10 +424,12 @@ def get_current_round():
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/repair-fixture-completed', methods=['POST'])
 @app.route('/api/v1/fixtures/repair-completed', methods=['POST'])
 def repair_fixture_completed():
     """Set is_completed=True for every fixture that has both actual_home_score and actual_away_score.
-    Fixes fixtures that have final scores but were left with is_completed=False (e.g. API mismatch)."""
+    Fixes fixtures that have final scores but were left with is_completed=False (e.g. API mismatch).
+    Use POST /api/v1/repair-fixture-completed if /api/v1/fixtures/repair-completed returns 404 (Flask-RESTful conflict)."""
     try:
         to_fix = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
