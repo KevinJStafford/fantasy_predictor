@@ -34,8 +34,15 @@ function Members() {
     const [adminSelectedMemberId, setAdminSelectedMemberId] = useState('')
     const [loadingMemberPredictions, setLoadingMemberPredictions] = useState(false)
     const [editPredictionDialog, setEditPredictionDialog] = useState(null) // { gameId, home_team, away_team, home_team_score, away_team_score }
+    const [backfillDialogOpen, setBackfillDialogOpen] = useState(false)
+    const [backfillJson, setBackfillJson] = useState('')
+    const [backfillMessage, setBackfillMessage] = useState(null)
 
-    const isAdmin = leagueDetail?.members?.some(m => Number(m.id) === Number(currentUser?.id) && m.role === 'admin') ?? false
+    // Prefer backend is_admin flag; fallback to member role or league creator
+    const isAdmin = leagueDetail?.is_admin === true ||
+        leagueDetail?.members?.some(m => Number(m.id) === Number(currentUser?.id) && m.role === 'admin') ||
+        (leagueDetail?.created_by != null && currentUser?.id != null && Number(leagueDetail.created_by) === Number(currentUser.id)) ||
+        false
     const leagueMembers = leagueDetail?.members ?? []
 
     // Get league_id from URL query params
@@ -383,7 +390,7 @@ function Members() {
                 )}
             </Box>
             <Typography variant="h5" component="h2"><span>Select Game Week:</span></Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                 <Button 
                     variant="contained" 
                     color="primary"
@@ -392,12 +399,14 @@ function Members() {
                 >
                     {syncing ? 'Syncing...' : 'Sync Fixtures'}
                 </Button>
-                <Button 
-                    variant="outlined" 
-                    color="primary"
-                    onClick={() => {
-                        setSyncing(true)
-                        authenticatedFetch('/api/v1/fixtures/sync-scores', {
+                {isAdmin && (
+                    <>
+                        <Button 
+                            variant="outlined" 
+                            color="primary"
+                            onClick={() => {
+                                setSyncing(true)
+                                authenticatedFetch('/api/v1/fixtures/sync-scores', {
                             method: 'POST',
                             body: JSON.stringify({
                                 api_url: 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
@@ -441,6 +450,16 @@ function Members() {
                 >
                     Sync Scores
                 </Button>
+                        <Button
+                            variant="outlined"
+                            color="secondary"
+                            onClick={() => setBackfillDialogOpen(true)}
+                            disabled={syncing}
+                        >
+                            Backfill standings
+                        </Button>
+                    </>
+                )}
             </Box>
         </Box>
         
@@ -859,6 +878,61 @@ function Members() {
                     </DialogActions>
                 </>
             )}
+        </Dialog>
+
+        {/* Backfill standings (admin) */}
+        <Dialog open={backfillDialogOpen} onClose={() => { setBackfillDialogOpen(false); setBackfillMessage(null); setBackfillJson(''); }} maxWidth="sm" fullWidth>
+            <DialogTitle>Backfill league standings</DialogTitle>
+            <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Paste JSON with a &quot;standings&quot; array. Each item: display_name (must match a league member), wins, draws, losses, points (optional).
+                </Typography>
+                <TextField
+                    multiline
+                    minRows={6}
+                    fullWidth
+                    placeholder={'{"standings": [{"display_name": "Alice", "wins": 5, "draws": 2, "losses": 1, "points": 17}]}'}
+                    value={backfillJson}
+                    onChange={(e) => setBackfillJson(e.target.value)}
+                    sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                />
+                {backfillMessage && (
+                    <Alert severity={backfillMessage.type} sx={{ mt: 2 }}>{backfillMessage.text}</Alert>
+                )}
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => { setBackfillDialogOpen(false); setBackfillMessage(null); setBackfillJson(''); }}>Cancel</Button>
+                <Button
+                    variant="contained"
+                    color="primary"
+                    disabled={!leagueId || !backfillJson.trim()}
+                    onClick={() => {
+                        let standings
+                        try {
+                            const data = JSON.parse(backfillJson.trim())
+                            standings = data.standings
+                            if (!Array.isArray(standings)) throw new Error('JSON must include "standings" array')
+                        } catch (e) {
+                            setBackfillMessage({ type: 'error', text: e.message || 'Invalid JSON' })
+                            return
+                        }
+                        authenticatedFetch(`/api/v1/leagues/${leagueId}/backfill-standings`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ standings })
+                        })
+                            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+                            .then(({ ok, data }) => {
+                                if (!ok) throw new Error(data.error || 'Request failed')
+                                setBackfillMessage({ type: 'success', text: data.message || 'Standings updated.' })
+                                fetchLeaderboard()
+                            })
+                            .catch((err) => setBackfillMessage({ type: 'error', text: err.message || 'Request failed' }))
+                    }}
+                >
+                    Submit
+                </Button>
+            </DialogActions>
         </Dialog>
         </Box>
         </>

@@ -427,17 +427,36 @@ def get_current_round():
 @app.route('/api/v1/repair-fixture-completed', methods=['POST'])
 @app.route('/api/v1/fixtures/repair-completed', methods=['POST'])
 def repair_fixture_completed():
-    """Set is_completed=True for every fixture that has both actual_home_score and actual_away_score.
-    Fixes fixtures that have final scores but were left with is_completed=False (e.g. API mismatch).
-    Use POST /api/v1/repair-fixture-completed if /api/v1/fixtures/repair-completed returns 404 (Flask-RESTful conflict)."""
+    """Set is_completed=True for fixtures.
+    - Default: only fixtures that have both actual_home_score and actual_away_score (and were still false).
+    - Optional JSON body: {"round": 24} marks ALL fixtures in that round as completed (use when one game
+      has is_completed=False but no scores stored, so the default repair finds 0)."""
     try:
+        data = request.get_json(silent=True) or {}
+        force_round = data.get('round') if data else None
+        if force_round is not None:
+            force_round = int(force_round)
+        count = 0
+        if force_round is not None:
+            to_fix = Fixture.query.filter(
+                Fixture.fixture_round == force_round,
+                or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
+            ).all()
+            for f in to_fix:
+                f.is_completed = True
+                count += 1
+            db.session.commit()
+            return make_response({
+                'message': f'Marked {count} fixture(s) in round {force_round} as completed.',
+                'updated': count,
+                'round': force_round
+            }, 200)
         to_fix = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
             Fixture.actual_away_score.isnot(None),
         ).filter(
             or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
         ).all()
-        count = 0
         for f in to_fix:
             f.is_completed = True
             count += 1
@@ -1729,7 +1748,11 @@ def get_user_leagues():
         if not user:
             return make_response({'error': 'User not found'}, 404)
         
-        leagues = [league.to_dict() for league in user.leagues]
+        leagues = []
+        for league in user.leagues:
+            d = league.to_dict()
+            d['is_admin'] = is_league_admin(user_id, league.id)
+            leagues.append(d)
         return make_response({'leagues': leagues}, 200)
     except Exception as e:
         print(f"Error fetching user leagues: {str(e)}")
