@@ -268,6 +268,38 @@ def get_next_incomplete_round():
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/fixtures/current-round', methods=['GET'])
+def get_current_round():
+    """Return the most recent game week (round) that has at least one fixture whose start time
+    is in the future (relative to now UTC). Use this as the default match week when loading a league.
+    If no round has future fixtures, returns the latest round number."""
+    try:
+        now_utc = datetime.now(timezone.utc)
+        # Largest round number among fixtures that have fixture_date > now
+        future_round_row = (
+            db.session.query(db.func.max(Fixture.fixture_round))
+            .filter(Fixture.fixture_round.isnot(None))
+            .filter(Fixture.fixture_date.isnot(None))
+            .filter(Fixture.fixture_date > now_utc)
+            .first()
+        )
+        if future_round_row and future_round_row[0] is not None:
+            return make_response({'round': future_round_row[0]}, 200)
+        # No future fixtures: return latest round so user sees the current/last week
+        max_round_row = (
+            db.session.query(db.func.max(Fixture.fixture_round))
+            .filter(Fixture.fixture_round.isnot(None))
+            .first()
+        )
+        round_num = max_round_row[0] if max_round_row and max_round_row[0] is not None else None
+        return make_response({'round': round_num}, 200)
+    except Exception as e:
+        import traceback
+        print(f"Error in get_current_round: {str(e)}")
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/fixtures/sync', methods=['POST'])
 def sync_fixtures():
     """
