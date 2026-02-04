@@ -90,8 +90,11 @@ function Members() {
         })
     }
 
-    function getNextIncompleteRoundAndLoad() {
-        fetch(apiUrl('/api/v1/fixtures/next-incomplete-round'))
+    /** Load the default game week: the largest week that has not fully completed yet (so users
+     *  don't have to remember the week number). When that week's last game completes, default
+     *  becomes the next week. */
+    function loadCurrentRoundAndFixtures() {
+        fetch(apiUrl('/api/v1/fixtures/current-round'), { cache: 'no-store' })
         .then(response => response.ok ? response.json() : { round: null })
         .then(data => {
             const round = data.round != null ? String(data.round) : ''
@@ -338,9 +341,9 @@ function Members() {
         getPredictions()
     }, [])
 
-    // When page opens, show the next not-completed week by default
+    // When league page loads, show the current match week (most recent week with games in the future)
     useEffect(() => {
-        getNextIncompleteRoundAndLoad()
+        loadCurrentRoundAndFixtures()
     }, [])
 
     const handleDropdownChange = (e) => {

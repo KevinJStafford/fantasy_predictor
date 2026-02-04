@@ -22,7 +22,10 @@ function ResetPassword() {
     const history = useHistory();
     const location = useLocation();
     const [success, setSuccess] = useState(false);
-    const token = new URLSearchParams(location.search).get('token');
+    // HashRouter: token can be in location.search or in the hash (#/reset-password?token=...)
+    const token =
+        new URLSearchParams(location.search).get('token') ||
+        new URLSearchParams((location.hash || '').split('?')[1] || '').get('token');
 
     const formik = useFormik({
         initialValues: { password: '', confirm_password: '' },

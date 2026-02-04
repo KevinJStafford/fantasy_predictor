@@ -1,13 +1,16 @@
 // API configuration utility
 // In development, uses proxy from package.json
-// In production, uses REACT_APP_API_URL environment variable
+// In production, uses REACT_APP_API_URL (set at build time) or fallback below
 
 import { getAuthHeaders } from './auth';
 
+// Fallback when REACT_APP_API_URL is not set in production build (e.g. missing in Vercel/Netlify)
+const PRODUCTION_API_FALLBACK = 'https://fantasy-predictor-api.onrender.com';
+
 const getApiUrl = () => {
-  // Check if we're in production and have an API URL set
-  if (process.env.NODE_ENV === 'production' && process.env.REACT_APP_API_URL) {
-    return process.env.REACT_APP_API_URL;
+  if (process.env.NODE_ENV === 'production') {
+    const url = (process.env.REACT_APP_API_URL || PRODUCTION_API_FALLBACK).replace(/\/$/, '');
+    return url;
   }
   // In development, use relative paths (proxy handles it)
   return '';

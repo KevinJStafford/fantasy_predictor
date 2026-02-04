@@ -65,18 +65,18 @@ api = Api(app)
 bcrypt = Bcrypt(app)
 
 # CORS configuration
-# In production, set CORS_ORIGINS environment variable
-cors_origins = os.getenv('CORS_ORIGINS', '*')
-if cors_origins != '*':
-    # Parse comma-separated origins
-    origins = [origin.strip() for origin in cors_origins.split(',')]
+# With credentials (auth), the browser requires an explicit origin (not *).
+# Set CORS_ORIGINS to your frontend URL(s), e.g. https://playfantasypredictor.com
+cors_origins = (os.getenv('CORS_ORIGINS') or '').strip()
+if cors_origins:
+    origins = [o.strip() for o in cors_origins.split(',') if o.strip()]
 else:
-    origins = '*'
+    origins = ['*']
 
-CORS(app, 
-     origins=origins, 
+CORS(app,
+     origins=origins,
      supports_credentials=True,
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
      allow_headers=['Content-Type', 'Authorization'])
 
 # Email (for password reset). Set MAIL_SERVER to enable sending.

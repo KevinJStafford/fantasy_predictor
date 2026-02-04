@@ -78,5 +78,10 @@ When a user requests a password reset, the backend can send the reset link by em
 
 ## Testing
 
-- **Without email configured:** Leave `MAIL_SERVER` unset. The forgot-password API will return `reset_link` in the JSON response so you can open it in the browser.
-- **With email configured:** Set all variables above. Request a reset with a real email address and check the inbox (and spam). The API will not return `reset_link` when the email is sent.
+- **Without email configured:** Leave `MAIL_SERVER` unset. After submitting “Forgot password”, the app shows the reset link on the same page so you can click it to set a new password (link expires in 1 hour).
+- **With email configured:** Set all variables above. Request a reset with a real email address and check the inbox (and spam). The app still shows the reset link on the page if you don’t receive the email.
+
+## Troubleshooting
+
+- **“Email never sends”** – If you never receive the reset email, the app always shows a **“Reset password”** link on the Forgot Password success screen when an account exists. Use that link to reset; it expires in 1 hour.
+- To enable real email delivery, set `MAIL_SERVER` and the other `MAIL_*` variables in your backend environment (e.g. Render dashboard). See Gmail / SendGrid / Mailgun above.
