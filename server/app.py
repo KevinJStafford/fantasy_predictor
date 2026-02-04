@@ -35,13 +35,26 @@ def _verify_password(user_id, password_str):
             print(f"Login: user_id={user_id} no hash in DB")
             return False
         if isinstance(row, bytes):
-            hash_str = row.decode('utf-8')
+            hash_str = row.decode('utf-8', errors='replace')
         else:
             hash_str = str(row) if row else None
+        # Normalize: DB or driver may add whitespace; bcrypt is sensitive to it
+        hash_str = (hash_str or '').strip()
         if not hash_str or not hash_str.startswith('$2'):
             print(f"Login: user_id={user_id} hash invalid (len={len(hash_str) if hash_str else 0}, starts_with_2b={hash_str.startswith('$2') if hash_str else False})")
             return False
-        ok = bcrypt.check_password_hash(hash_str, str(password_str).strip())
+        password_clean = (str(password_str) or '').strip()
+        ok = bcrypt.check_password_hash(hash_str, password_clean)
+        if not ok:
+            # Fallback: try underlying bcrypt with bytes (handles encoding edge cases)
+            try:
+                import bcrypt as bcrypt_lib
+                ok = bcrypt_lib.checkpw(
+                    password_clean.encode('utf-8'),
+                    hash_str.encode('utf-8')
+                )
+            except Exception:
+                pass
         if not ok:
             print(f"Login: user_id={user_id} hash_len={len(hash_str)} bcrypt_check=False")
         return ok
