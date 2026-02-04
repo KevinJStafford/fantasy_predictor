@@ -383,9 +383,9 @@ def get_next_incomplete_round():
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
-    """Return the default game week: the largest round that has NOT fully completed yet
-    (at least one fixture in that round has is_completed = False or NULL). E.g. GW 25 stays
-    default until GW 25's last game completes, then default becomes GW 26."""
+    """Return the default game week: the lowest round that has NOT fully completed yet
+    (at least one fixture in that round has is_completed = False or NULL). Before GW1 it's
+    week 1; after GW1 finishes it becomes week 2, and so on until the season ends (e.g. week 38)."""
     try:
         # Incomplete = not completed: is_completed is False or NULL (unplayed games)
         incomplete_rounds = (
@@ -397,9 +397,9 @@ def get_current_round():
         )
         if incomplete_rounds:
             try:
-                round_num = max(int(r[0]) for r in incomplete_rounds)
+                round_num = min(int(r[0]) for r in incomplete_rounds)
             except (TypeError, ValueError):
-                round_num = max(r[0] for r in incomplete_rounds if r[0] is not None)
+                round_num = min(r[0] for r in incomplete_rounds if r[0] is not None)
             if round_num is not None:
                 resp = make_response({'round': round_num}, 200)
                 resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
