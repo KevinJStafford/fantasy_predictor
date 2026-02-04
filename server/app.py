@@ -16,10 +16,38 @@ from flask import request, make_response, session
 from flask_restful import Resource
 
 # Local imports
-from config import app, db, api
+from config import app, db, api, bcrypt
 # Add your model imports
 from models import User, Game, Prediction, Fixture, League, LeagueMembership
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
+
+
+def _verify_password(user_id, password_str):
+    """Verify password without touching User.authenticate (avoids recursion with ORM).
+    Fetches hash via a simple column query."""
+    if not user_id or not password_str:
+        return False
+    try:
+        stmt = select(User._password_hash).where(User.id == user_id)
+        result = db.session.execute(stmt)
+        row = result.scalar() if result else None
+        if row is None:
+            print(f"Login: user_id={user_id} no hash in DB")
+            return False
+        if isinstance(row, bytes):
+            hash_str = row.decode('utf-8')
+        else:
+            hash_str = str(row) if row else None
+        if not hash_str or not hash_str.startswith('$2'):
+            print(f"Login: user_id={user_id} hash invalid (len={len(hash_str) if hash_str else 0}, starts_with_2b={hash_str.startswith('$2') if hash_str else False})")
+            return False
+        ok = bcrypt.check_password_hash(hash_str, str(password_str).strip())
+        if not ok:
+            print(f"Login: user_id={user_id} hash_len={len(hash_str)} bcrypt_check=False")
+        return ok
+    except Exception as e:
+        print(f"Login: _verify_password user_id={user_id} error={e}")
+        return False
 
 
 @app.after_request
@@ -1504,19 +1532,15 @@ def login():
         if not user and not email and not username:
             return make_response({'error': 'Email and password are required'}, 400)
         pw_clean = (str(password) if password is not None else '').strip()
-        if user and user.authenticate(pw_clean):
+        if user and _verify_password(user.id, pw_clean):
             session['user_id'] = user.id
             token = generate_token(user.id)
             return make_response({
                 'user': user.to_dict(),
                 'token': token
             }, 200)
-        # Debug: log hash length when auth fails (bcrypt hashes are 60 chars; truncated = wrong)
-        if user and user._password_hash is not None:
-            h = user._password_hash
-            length = len(h) if hasattr(h, '__len__') else -1
-            kind = type(h).__name__
-            print(f"Login failed: user_id={user.id} hash_type={kind} hash_len={length} (expected 60)")
+        if not user:
+            print("Login 401: no user found for email (check email spelling / case)")
         return make_response({'error': 'Invalid email or password'}, 401)
     except RecursionError:
         print("Login error: recursion in auth path")
@@ -1936,11 +1960,24 @@ def get_league_leaderboard(league_id):
                     return f
             return None
 
-        # Calculate points per member using LeagueMembership for display_name (exclude soft-deleted users)
+        # Calculate points per member: use backfilled standings if set, else from predictions/games
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
             if member.deleted_at:
+                continue
+            # Use backfilled data (e.g. from Google Sheet) when present
+            if lm.backfill_points is not None:
+                leaderboard.append({
+                    'user_id': member.id,
+                    'display_name': lm.display_name,
+                    'wins': lm.backfill_wins or 0,
+                    'draws': lm.backfill_draws or 0,
+                    'losses': lm.backfill_losses or 0,
+                    'points': lm.backfill_points,
+                    'total_games': (lm.backfill_wins or 0) + (lm.backfill_draws or 0) + (lm.backfill_losses or 0),
+                    'source': 'backfill',
+                })
                 continue
             games = Game.query.filter_by(user_id=member.id).all()
             wins = 0
@@ -1975,6 +2012,58 @@ def get_league_leaderboard(league_id):
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/backfill-standings', methods=['POST'])
+def backfill_league_standings(league_id):
+    """Admin only: set wins/draws/losses/points for league members from imported data (e.g. Google Sheet).
+    Body: { "standings": [ { "display_name": "Alice", "wins": 5, "draws": 2, "losses": 1, "points": 17 }, ... ] }
+    display_name must match an existing league member. Points can be omitted and will be computed as wins*3 + draws*1."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only a league admin can backfill standings'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        data = request.get_json() or {}
+        standings = data.get('standings')
+        if not isinstance(standings, list):
+            return make_response({'error': 'Body must include "standings": [ { "display_name", "wins", "draws", "losses" } ]'}, 400)
+        # Map display_name -> LeagueMembership for this league
+        by_display_name = { lm.display_name.strip().lower(): lm for lm in league.league_memberships }
+        updated = 0
+        for row in standings:
+            if not isinstance(row, dict):
+                continue
+            display_name = (row.get('display_name') or '').strip()
+            if not display_name:
+                continue
+            key = display_name.lower()
+            lm = by_display_name.get(key)
+            if not lm:
+                continue
+            try:
+                wins = int(row.get('wins', 0)) if row.get('wins') is not None else 0
+                draws = int(row.get('draws', 0)) if row.get('draws') is not None else 0
+                losses = int(row.get('losses', 0)) if row.get('losses') is not None else 0
+                points = int(row['points']) if row.get('points') is not None else (wins * 3) + (draws * 1) + (losses * 0)
+            except (TypeError, ValueError):
+                continue
+            lm.backfill_wins = wins
+            lm.backfill_draws = draws
+            lm.backfill_losses = losses
+            lm.backfill_points = points
+            updated += 1
+        db.session.commit()
+        return make_response({'message': f'Backfilled standings for {updated} member(s)'}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error backfilling standings: {str(e)}")
+        return make_response({'error': str(e)}, 500)
+
 
 @app.route('/api/v1/migrate', methods=['POST'])
 def run_migrations():

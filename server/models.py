@@ -14,6 +14,11 @@ class LeagueMembership(db.Model, SerializerMixin):
     display_name = db.Column(db.String, nullable=False)  # unique per league
     role = db.Column(db.String, nullable=False, default='player')  # 'admin' | 'player'
     joined_at = db.Column(db.DateTime, server_default=db.func.now())
+    # Optional backfilled standings (e.g. from Google Sheet); when set, leaderboard uses these
+    backfill_wins = db.Column(db.Integer, nullable=True)
+    backfill_draws = db.Column(db.Integer, nullable=True)
+    backfill_losses = db.Column(db.Integer, nullable=True)
+    backfill_points = db.Column(db.Integer, nullable=True)
 
     __table_args__ = (db.UniqueConstraint('league_id', 'display_name', name='uq_league_display_name'),)
 
