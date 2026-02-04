@@ -29,7 +29,7 @@ class User(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=True)  # optional; league display_name used per league
     email = db.Column(db.String, unique=True, nullable=False)
-    _password_hash = db.Column(db.String)
+    _password_hash = db.Column(db.String(255))  # bcrypt hashes are 60 chars; 255 avoids truncation
     reset_token = db.Column(db.String, nullable=True)
     reset_token_expires = db.Column(db.DateTime, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)  # soft delete: when set, user is treated as deleted
@@ -48,8 +48,8 @@ class User(db.Model, SerializerMixin):
         if plain_text_password is None:
             self._password_hash = None
             return
-        p = str(plain_text_password)
-        # Flask-Bcrypt in Python 3: decode hash to utf-8 before storing
+        p = str(plain_text_password).strip()
+        # Flask-Bcrypt in Python 3: decode hash to utf-8 before storing (hash is 60 chars)
         encrypted = bcrypt.generate_password_hash(p)
         self._password_hash = encrypted.decode('utf-8') if isinstance(encrypted, bytes) else encrypted
         

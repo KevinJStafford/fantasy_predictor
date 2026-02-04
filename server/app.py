@@ -1528,9 +1528,11 @@ def reset_password():
     confirm_password = data.get('confirm_password')
     if not token:
         return make_response({'error': 'Reset token is required'}, 400)
-    if not password:
+    pw = (str(password) if password is not None else '').strip()
+    confirm_pw = (str(confirm_password) if confirm_password is not None else '').strip()
+    if not pw:
         return make_response({'error': 'Password is required'}, 400)
-    if password != confirm_password:
+    if pw != confirm_pw:
         return make_response({'error': 'Password and confirmation do not match'}, 400)
     now = datetime.now(timezone.utc)
     user = User.query.filter(
@@ -1541,7 +1543,7 @@ def reset_password():
     ).first()
     if not user:
         return make_response({'error': 'Invalid or expired reset link. Please request a new one.'}, 400)
-    user.password_hash = password
+    user.password_hash = pw
     user.reset_token = None
     user.reset_token_expires = None
     db.session.commit()
