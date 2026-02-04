@@ -383,28 +383,25 @@ def get_next_incomplete_round():
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
-    """Return the default game week: the lowest round that has NOT fully completed yet
-    (at least one fixture in that round has is_completed = False or NULL). Before GW1 it's
-    week 1; after GW1 finishes it becomes week 2, and so on until the season ends (e.g. week 38)."""
+    """Return the default game week: the lowest round that has NOT fully completed yet.
+    A fixture counts as complete if is_completed is True OR it has both actual scores (so
+    one bad is_completed=False with scores doesn't keep the round 'current')."""
     try:
-        # Incomplete = not completed: is_completed is False or NULL (unplayed games)
-        incomplete_rounds = (
-            db.session.query(Fixture.fixture_round)
-            .filter(Fixture.fixture_round.isnot(None))
-            .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
-            .distinct()
-            .all()
+        # Incomplete = no final score yet: (is_completed not True) AND (missing actual_home or actual_away)
+        incomplete_condition = db.session.query(Fixture.fixture_round).filter(
+            Fixture.fixture_round.isnot(None)
+        ).filter(
+            or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
+        ).filter(
+            or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None))
         )
-        if incomplete_rounds:
-            try:
-                round_num = min(int(r[0]) for r in incomplete_rounds)
-            except (TypeError, ValueError):
-                round_num = min(r[0] for r in incomplete_rounds if r[0] is not None)
-            if round_num is not None:
-                resp = make_response({'round': round_num}, 200)
-                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
-                return resp
-        # All fixtures complete (or no fixtures): return latest round
+        next_round_row = incomplete_condition.order_by(Fixture.fixture_round.asc()).first()
+        if next_round_row and next_round_row[0] is not None:
+            round_num = int(next_round_row[0]) if not isinstance(next_round_row[0], int) else next_round_row[0]
+            resp = make_response({'round': round_num}, 200)
+            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+            return resp
+        # All fixtures complete (or no fixtures): return latest round so end-of-season shows last week
         all_rounds = (
             db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
@@ -424,6 +421,31 @@ def get_current_round():
         import traceback
         print(f"Error in get_current_round: {str(e)}")
         print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/fixtures/repair-completed', methods=['POST'])
+def repair_fixture_completed():
+    """Set is_completed=True for every fixture that has both actual_home_score and actual_away_score.
+    Fixes fixtures that have final scores but were left with is_completed=False (e.g. API mismatch)."""
+    try:
+        to_fix = Fixture.query.filter(
+            Fixture.actual_home_score.isnot(None),
+            Fixture.actual_away_score.isnot(None),
+        ).filter(
+            or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
+        ).all()
+        count = 0
+        for f in to_fix:
+            f.is_completed = True
+            count += 1
+        db.session.commit()
+        return make_response({
+            'message': f'Marked {count} fixture(s) as completed (had scores but is_completed was false).',
+            'updated': count
+        }, 200)
+    except Exception as e:
+        db.session.rollback()
         return make_response({'error': str(e)}, 500)
 
 

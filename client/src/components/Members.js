@@ -90,11 +90,10 @@ function Members() {
         })
     }
 
-    /** Load the default game week: the largest week that has not fully completed yet (so users
-     *  don't have to remember the week number). When that week's last game completes, default
-     *  becomes the next week. */
+    /** Load the default game week: the lowest week that has not fully completed yet (week 1
+     *  before GW1, then week 2 after GW1, etc.). */
     function loadCurrentRoundAndFixtures() {
-        fetch(apiUrl('/api/v1/fixtures/current-round'), { cache: 'no-store' })
+        fetch(apiUrl('/api/v1/fixtures/current-round') + '?t=' + Date.now(), { cache: 'no-store' })
         .then(response => response.ok ? response.json() : { round: null })
         .then(data => {
             const round = data.round != null ? String(data.round) : ''
