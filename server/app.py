@@ -24,7 +24,7 @@ from sqlalchemy import func, or_
 
 @app.after_request
 def add_cors_headers_if_missing(response):
-    """Ensure CORS headers are on every response so browser shows real errors (e.g. 502) instead of CORS."""
+    """Ensure all required CORS headers are on every response (fixes 'missing allow header' on login etc)."""
     try:
         origin = request.headers.get('Origin')
         if not origin:
@@ -32,10 +32,15 @@ def add_cors_headers_if_missing(response):
         allowed = app.config.get('CORS_ORIGINS_LIST') or []
         if allowed and allowed != ['*'] and origin not in allowed:
             return response
+        # Add full set so preflight and actual requests both succeed
         if response.headers.get('Access-Control-Allow-Origin') is None:
             response.headers['Access-Control-Allow-Origin'] = origin
         if response.headers.get('Access-Control-Allow-Credentials') is None:
             response.headers['Access-Control-Allow-Credentials'] = 'true'
+        if response.headers.get('Access-Control-Allow-Methods') is None:
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        if response.headers.get('Access-Control-Allow-Headers') is None:
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     except Exception:
         pass
     return response
