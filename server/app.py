@@ -1586,7 +1586,17 @@ def reset_password():
     user.password_hash = pw
     user.reset_token = None
     user.reset_token_expires = None
+    db.session.flush()
     db.session.commit()
+    # Verify the new password was stored (re-load from DB in case of session/column issues)
+    db.session.refresh(user)
+    try:
+        if not user.authenticate(pw):
+            print("Reset password: stored hash did not verify; possible column truncation or DB issue")
+            return make_response({'error': 'Password could not be saved correctly. Please try again or contact support.'}, 500)
+    except Exception as e:
+        print(f"Reset password verify failed: {e}")
+        return make_response({'error': 'Password could not be verified. Please try again.'}, 500)
     return make_response({'message': 'Password reset successfully. You can now log in.'}, 200)
 
 
