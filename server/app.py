@@ -270,28 +270,39 @@ def get_next_incomplete_round():
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
-    """Return the most recent game week (round) that has at least one fixture whose start time
-    is in the future (relative to now UTC). Use this as the default match week when loading a league.
-    If no round has future fixtures, returns the latest round number."""
+    """Return the active game week: the most recent round that has at least one upcoming game
+    (fixture start time in the future, UTC). This is the default match week so users don't have to
+    remember the week number. If all fixtures are past, returns the latest round."""
     try:
         now_utc = datetime.now(timezone.utc)
-        # Largest round number among fixtures that have fixture_date > now
+        # Active week = largest round that has at least one fixture with start time in the future
         future_round_row = (
-            db.session.query(db.func.max(Fixture.fixture_round))
+            db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
             .filter(Fixture.fixture_date.isnot(None))
             .filter(Fixture.fixture_date > now_utc)
+            .order_by(Fixture.fixture_round.desc())
             .first()
         )
         if future_round_row and future_round_row[0] is not None:
-            return make_response({'round': future_round_row[0]}, 200)
-        # No future fixtures: return latest round so user sees the current/last week
-        max_round_row = (
-            db.session.query(db.func.max(Fixture.fixture_round))
+            try:
+                return make_response({'round': int(future_round_row[0])}, 200)
+            except (TypeError, ValueError):
+                pass
+        # No future fixtures: return latest round (numerically) so user sees the current/last week
+        all_rounds = (
+            db.session.query(Fixture.fixture_round)
             .filter(Fixture.fixture_round.isnot(None))
-            .first()
+            .distinct()
+            .all()
         )
-        round_num = max_round_row[0] if max_round_row and max_round_row[0] is not None else None
+        round_num = None
+        if all_rounds:
+            try:
+                # Cast to int so we get numeric max (handles string "24" vs "38" in DB)
+                round_num = max(int(r[0]) for r in all_rounds)
+            except (TypeError, ValueError):
+                round_num = max(r[0] for r in all_rounds if r[0] is not None)
         return make_response({'round': round_num}, 200)
     except Exception as e:
         import traceback
