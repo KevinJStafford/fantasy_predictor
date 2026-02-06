@@ -37,6 +37,9 @@ function Members() {
     const [backfillDialogOpen, setBackfillDialogOpen] = useState(false)
     const [backfillJson, setBackfillJson] = useState('')
     const [backfillMessage, setBackfillMessage] = useState(null)
+    const [plStandings, setPlStandings] = useState(null)
+    const [loadingStandings, setLoadingStandings] = useState(false)
+    const [standingsError, setStandingsError] = useState(null)
 
     // Prefer backend is_admin flag; fallback to member role or league creator
     const isAdmin = leagueDetail?.is_admin === true ||
@@ -76,6 +79,22 @@ function Members() {
             .catch(() => setLeagueDetail(null))
         fetchLeaderboard()
     }, [leagueId])
+
+    // Fetch Premier League standings (no auth) for reference when making predictions
+    useEffect(() => {
+        setLoadingStandings(true)
+        setStandingsError(null)
+        fetch(apiUrl('/api/v1/standings'))
+            .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Failed to load standings') }))
+            .then(data => {
+                setPlStandings(data.standings || [])
+            })
+            .catch(err => {
+                setStandingsError(err.message || 'Could not load Premier League table')
+                setPlStandings([])
+            })
+            .finally(() => setLoadingStandings(false))
+    }, [])
 
     function getAvailableRounds() {
         fetch(apiUrl('/api/v1/fixtures/rounds'))
@@ -557,8 +576,58 @@ function Members() {
                 )}
             </Grid>
 
-            {/* Right side: Leaderboard + Results (with padding from edge) */}
+            {/* Right side: Premier League table + Leaderboard + Results (with padding from edge) */}
             <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
+                {/* Premier League table (real standings for reference) */}
+                <Card variant="outlined" sx={{ mb: 2 }}>
+                    <CardContent>
+                        <Typography variant="h6" component="h3" sx={{ mb: 1.5, fontWeight: 600 }}>
+                            Premier League table
+                        </Typography>
+                        {loadingStandings ? (
+                            <Typography variant="body2" color="text.secondary">Loading…</Typography>
+                        ) : standingsError ? (
+                            <Typography variant="body2" color="error">{standingsError}</Typography>
+                        ) : plStandings && plStandings.length > 0 ? (
+                            <TableContainer sx={{ maxHeight: 340, overflow: 'auto' }}>
+                                <Table size="small" stickyHeader>
+                                    <TableHead>
+                                        <TableRow sx={{ backgroundColor: 'grey.100' }}>
+                                            <TableCell sx={{ fontWeight: 700, width: 32 }}>#</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>Team</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>P</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>W</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>D</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>L</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>GF</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 36 }}>GA</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 40 }}>GD</TableCell>
+                                            <TableCell align="center" sx={{ fontWeight: 700, width: 40 }}>Pts</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {plStandings.map((row) => (
+                                            <TableRow key={row.position}>
+                                                <TableCell sx={{ fontWeight: 500 }}>{row.position}</TableCell>
+                                                <TableCell>{row.team}</TableCell>
+                                                <TableCell align="center">{row.played}</TableCell>
+                                                <TableCell align="center">{row.won}</TableCell>
+                                                <TableCell align="center">{row.drawn}</TableCell>
+                                                <TableCell align="center">{row.lost}</TableCell>
+                                                <TableCell align="center">{row.goalsFor}</TableCell>
+                                                <TableCell align="center">{row.goalsAgainst}</TableCell>
+                                                <TableCell align="center">{row.goalDifference >= 0 ? `+${row.goalDifference}` : row.goalDifference}</TableCell>
+                                                <TableCell align="center" sx={{ fontWeight: 600 }}>{row.points}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        ) : (
+                            <Typography variant="body2" color="text.secondary">No standings data.</Typography>
+                        )}
+                    </CardContent>
+                </Card>
                 <Box sx={{ position: 'sticky', top: 20 }}>
                     {/* Leaderboard Table */}
                     <Box sx={{ mb: 3 }}>

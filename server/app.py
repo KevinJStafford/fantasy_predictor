@@ -310,6 +310,50 @@ class Fixtures(Resource):
 
 api.add_resource(Fixtures, '/api/v1/fixtures', '/api/v1/fixtures/<int:round_number>')
 
+# Premier League standings (read-only, for display to help with predictions)
+STANDINGS_API_URL = os.getenv(
+    'STANDINGS_API_URL',
+    'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v5/competitions/8/seasons/2025/standings?live=false'
+)
+
+@app.route('/api/v1/standings', methods=['GET'])
+def get_standings():
+    """Fetch current Premier League table from external API for display (no auth required)."""
+    if not REQUESTS_AVAILABLE:
+        return make_response({'error': 'Standings unavailable (requests not available).'}, 503)
+    try:
+        url = request.args.get('api_url') or STANDINGS_API_URL
+        resp = requests.get(url, headers={'Accept': 'application/json'}, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        tables = data.get('tables') or []
+        entries = tables[0].get('entries', []) if tables else []
+        matchweek = data.get('matchweek')
+        standings = []
+        for e in entries:
+            team = e.get('team') or {}
+            overall = e.get('overall') or {}
+            standings.append({
+                'position': overall.get('position'),
+                'team': team.get('name') or team.get('shortName') or '—',
+                'played': overall.get('played', 0),
+                'won': overall.get('won', 0),
+                'drawn': overall.get('drawn', 0),
+                'lost': overall.get('lost', 0),
+                'goalsFor': overall.get('goalsFor', 0),
+                'goalsAgainst': overall.get('goalsAgainst', 0),
+                'goalDifference': (overall.get('goalsFor', 0) or 0) - (overall.get('goalsAgainst', 0) or 0),
+                'points': overall.get('points', 0),
+            })
+        return make_response({
+            'matchweek': matchweek,
+            'standings': standings,
+        }, 200)
+    except requests.RequestException as e:
+        return make_response({'error': f'Could not fetch standings: {str(e)}'}, 502)
+    except (KeyError, IndexError, TypeError) as e:
+        return make_response({'error': f'Invalid standings data: {str(e)}'}, 502)
+
 @app.route('/api/v1/fixtures/rounds', methods=['GET'])
 def get_available_rounds():
     """Get all available game week rounds from fixtures"""
