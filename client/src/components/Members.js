@@ -515,8 +515,8 @@ function Members() {
         )}
 
         <Grid container spacing={3}>
-            {/* Left side: Predictions and Results (only when game week is selected) */}
-            <Grid item xs={12} md={7}>
+            {/* Left side: Predictions and Results - pl: 2 on md so table left edge aligns with PL table in right column */}
+            <Grid item xs={12} md={7} sx={{ pl: { md: 2 } }}>
                 {gameWeek ? (
                     <>
                         <Typography variant="h5" component="h2" sx={{ mb: 2, textAlign: 'center', fontWeight: 600 }}>
@@ -578,18 +578,18 @@ function Members() {
 
             {/* Right side: Premier League table + Leaderboard + Results (with padding from edge) */}
             <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
-                {/* Premier League table (real standings for reference) */}
+                {/* Premier League table (real standings for reference) - no horizontal padding so table aligns with prediction table */}
                 <Card variant="outlined" sx={{ mb: 2 }}>
-                    <CardContent>
-                        <Typography variant="h6" component="h3" sx={{ mb: 1.5, fontWeight: 600 }}>
+                    <CardContent sx={{ px: 0, '&:last-child': { pb: 2 }, pt: 2, pb: 0 }}>
+                        <Typography variant="h6" component="h3" sx={{ mb: 1.5, fontWeight: 600, px: 2 }}>
                             Premier League table
                         </Typography>
                         {loadingStandings ? (
                             <Typography variant="body2" color="text.secondary">Loading…</Typography>
                         ) : standingsError ? (
-                            <Typography variant="body2" color="error">{standingsError}</Typography>
+                            <Typography variant="body2" color="error" sx={{ px: 2 }}>{standingsError}</Typography>
                         ) : plStandings && plStandings.length > 0 ? (
-                            <TableContainer sx={{ maxHeight: 340, overflow: 'auto' }}>
+                            <TableContainer sx={{ maxHeight: 340, overflow: 'auto', px: 0 }}>
                                 <Table size="small" stickyHeader>
                                     <TableHead>
                                         <TableRow sx={{ backgroundColor: 'grey.100' }}>
@@ -624,7 +624,7 @@ function Members() {
                                 </Table>
                             </TableContainer>
                         ) : (
-                            <Typography variant="body2" color="text.secondary">No standings data.</Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ px: 2 }}>No standings data.</Typography>
                         )}
                     </CardContent>
                 </Card>
