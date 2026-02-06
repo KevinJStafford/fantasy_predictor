@@ -769,43 +769,12 @@ function Members() {
                         </Box>
                     )}
 
-                    {/* Results Section for Selected Week (below leaderboard) */}
+                    {/* Results Section for Selected Week (below leaderboard) - check-results runs automatically on page load */}
                     {gameWeek && (
                         <Box sx={{ mt: 3 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                                <Typography variant="h6" component="h2">
-                                    Results - Week {gameWeek}
-                                </Typography>
-                                <Button 
-                                    variant="outlined" 
-                                    color="primary"
-                                    size="small"
-                                    onClick={() => {
-                                        setLoadingPredictions(true)
-                                        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
-                                            .then(res => res.json())
-                                            .then(data => {
-                                                getPredictions()
-                                                if (leagueId) fetchLeaderboard()
-                                                if (data.fixtures_not_found > 0 || data.fixtures_no_scores > 0) {
-                                                    setSyncMessage({
-                                                        type: 'warning',
-                                                        text: `Results checked. ${data.wins || 0}W/${data.draws || 0}D/${data.losses || 0}L. ${data.fixtures_not_found || 0} not found, ${data.fixtures_no_scores || 0} missing scores. Try "Sync Scores" first.`
-                                                    })
-                                                    setTimeout(() => setSyncMessage(null), 8000)
-                                                }
-                                            })
-                                            .catch(err => {
-                                                setSyncMessage({ type: 'error', text: 'Failed to check results' })
-                                                setTimeout(() => setSyncMessage(null), 5000)
-                                            })
-                                            .finally(() => setLoadingPredictions(false))
-                                    }}
-                                    disabled={loadingPredictions}
-                                >
-                                    {loadingPredictions ? 'Loading...' : 'Refresh'}
-                                </Button>
-                            </Box>
+                            <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
+                                Results - Week {gameWeek}
+                            </Typography>
 
                             {loadingPredictions ? (
                                 <Typography variant="body2">Loading results...</Typography>
