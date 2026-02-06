@@ -1550,17 +1550,16 @@ def check_prediction_results():
                     print(f"DEBUG check-results: Fixture not found for prediction: {game.home_team} vs {game.away_team}")
                 continue
             
-            if not fixture.is_completed:
-                fixtures_not_completed += 1
-                if fixtures_not_completed <= 3:
-                    print(f"DEBUG check-results: Fixture not completed: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, is_completed={fixture.is_completed}")
-                continue
-            
+            # Treat as completed if we have both scores (even when is_completed is False), so results and leaderboard update
             if fixture.actual_home_score is None or fixture.actual_away_score is None:
                 fixtures_no_scores += 1
                 if fixtures_no_scores <= 3:
                     print(f"DEBUG check-results: Fixture has no scores: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, is_completed={fixture.is_completed}, scores={fixture.actual_home_score}-{fixture.actual_away_score}")
                 continue
+            if not fixture.is_completed:
+                fixtures_not_completed += 1
+                if fixtures_not_completed <= 3:
+                    print(f"DEBUG check-results: Fixture not marked completed but has scores: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, processing anyway")
             
             # Get predicted and actual scores
             pred_home = game.home_team_score
@@ -2081,9 +2080,10 @@ def get_league_leaderboard(league_id):
         if not user or user not in league.members:
             return make_response({'error': 'User is not a member of this league'}, 403)
         
-        # Helper: compute Win/Draw/Loss from predicted vs actual scores (same logic as check-results)
+        # Helper: compute Win/Draw/Loss from predicted vs actual scores (same logic as check-results).
+        # Treat fixture as completed if it has both scores (even when is_completed is False), so leaderboard updates.
         def _result_for_game(game, fixture):
-            if not fixture or not fixture.is_completed or fixture.actual_home_score is None or fixture.actual_away_score is None:
+            if not fixture or fixture.actual_home_score is None or fixture.actual_away_score is None:
                 return None
             if game.home_team_score is None or game.away_team_score is None:
                 return None
@@ -2109,29 +2109,18 @@ def get_league_leaderboard(league_id):
                     return f
             return None
 
-        # Calculate points per member: use backfilled standings if set, else from predictions/games
+        # Combine backfill (imported table) with live W/D/L from scored predictions going forward
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
             if member.deleted_at:
                 continue
-            # Use backfilled data (e.g. from Google Sheet) when present
-            if lm.backfill_points is not None:
-                leaderboard.append({
-                    'user_id': member.id,
-                    'display_name': lm.display_name,
-                    'wins': lm.backfill_wins or 0,
-                    'draws': lm.backfill_draws or 0,
-                    'losses': lm.backfill_losses or 0,
-                    'points': lm.backfill_points,
-                    'total_games': (lm.backfill_wins or 0) + (lm.backfill_draws or 0) + (lm.backfill_losses or 0),
-                    'source': 'backfill',
-                })
-                continue
+            # Start with backfill totals (e.g. from Google Sheet)
+            wins = lm.backfill_wins or 0
+            draws = lm.backfill_draws or 0
+            losses = lm.backfill_losses or 0
+            # Add live results from member's predictions for fixtures that have scores
             games = Game.query.filter_by(user_id=member.id).all()
-            wins = 0
-            draws = 0
-            losses = 0
             for g in games:
                 fixture = _fixture_for_game(g)
                 result = _result_for_game(g, fixture)
@@ -2142,6 +2131,7 @@ def get_league_leaderboard(league_id):
                 elif result == 'Loss':
                     losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
+            total_games = wins + draws + losses
             leaderboard.append({
                 'user_id': member.id,
                 'display_name': lm.display_name,
@@ -2149,7 +2139,7 @@ def get_league_leaderboard(league_id):
                 'draws': draws,
                 'losses': losses,
                 'points': points,
-                'total_games': len(games)
+                'total_games': total_games,
             })
         
         # Sort by points (descending), then by wins, then by draws

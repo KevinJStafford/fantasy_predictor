@@ -1,6 +1,6 @@
 # Backfilling league standings from a Google Sheet
 
-You can import wins/draws/losses/points for league members (e.g. from a spreadsheet) so the leaderboard shows that data instead of (or before) prediction-based results.
+You can import wins/draws/losses/points for league members (e.g. from a spreadsheet). The leaderboard **keeps** this backfill and **adds** live W/D/L from scored prediction games going forward (backfill + live, not one or the other).
 
 ## Requirements
 
@@ -52,8 +52,8 @@ Your sheet should have columns like:
 
 ## After backfill
 
-- The **leaderboard** for that league will show the backfilled wins/draws/losses/points for any member who has backfill data.
-- To switch back to prediction-based standings, an admin would need to clear backfill (e.g. set those members’ backfill fields to null via a future “Clear backfill” endpoint or DB update).
+- The **leaderboard** shows **backfill totals plus** live W/D/L from each member's predictions for scored fixtures (backfill + scored games going forward).
+- To show only prediction-based totals, clear backfill (e.g. set those members’ backfill fields to null via a future “Clear backfill” endpoint or DB update).
 
 ## Clearing backfill
 

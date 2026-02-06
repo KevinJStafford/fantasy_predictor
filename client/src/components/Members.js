@@ -292,7 +292,7 @@ function Members() {
     function fetchLeaderboard() {
         if (!leagueId) return
         setLoadingLeaderboard(true)
-        authenticatedFetch(`/api/v1/leagues/${leagueId}/leaderboard`)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/leaderboard?t=${Date.now()}`)
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Failed to fetch leaderboard')
