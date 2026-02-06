@@ -96,6 +96,39 @@ function Members() {
             .finally(() => setLoadingStandings(false))
     }, [])
 
+    // On league page load: refresh results (check-results) for everyone; admins also trigger sync-scores in background
+    const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
+    useEffect(() => {
+        if (!leagueId) return
+        // Everyone: run check-results so W/D/L are up to date from current fixture data
+        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+            .then(() => {
+                getPredictions()
+                fetchLeaderboard()
+            })
+            .catch(() => {})
+
+        if (!isAdmin) return
+
+        // Admin: sync scores from external API in background, then refresh results again
+        setSyncing(true)
+        authenticatedFetch('/api/v1/fixtures/sync-scores', {
+            method: 'POST',
+            body: JSON.stringify({ api_url: SYNC_SCORES_API_URL })
+        })
+            .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
+            .then(data => {
+                if (data.error) throw new Error(data.error)
+                return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+            })
+            .then(() => {
+                getPredictions()
+                fetchLeaderboard()
+            })
+            .catch(() => {})
+            .finally(() => setSyncing(false))
+    }, [leagueId, isAdmin])
+
     function getAvailableRounds() {
         fetch(apiUrl('/api/v1/fixtures/rounds'))
         .then(response => {
@@ -419,55 +452,6 @@ function Members() {
                         >
                             {syncing ? 'Syncing...' : 'Sync Fixtures'}
                         </Button>
-                        <Button 
-                            variant="outlined" 
-                            color="primary"
-                            onClick={() => {
-                                setSyncing(true)
-                                authenticatedFetch('/api/v1/fixtures/sync-scores', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                api_url: 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
-                            })
-                        })
-                        .then(async response => {
-                            const data = await response.json()
-                            if (!response.ok) {
-                                throw new Error(data.error || 'Failed to sync scores')
-                            }
-                            // After syncing scores, check results
-                                return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
-                                .then(res => res.json())
-                                .then((resultData) => {
-                                    getPredictions() // Refresh results
-                                    if (leagueId) {
-                                        fetchLeaderboard() // Refresh leaderboard
-                                    }
-                                    const details = [
-                                        `Updated: ${resultData.results_updated || 0}`,
-                                        `W: ${resultData.wins || 0}, D: ${resultData.draws || 0}, L: ${resultData.losses || 0}`,
-                                        resultData.fixtures_not_found > 0 ? `Not found: ${resultData.fixtures_not_found}` : null,
-                                        resultData.fixtures_not_completed > 0 ? `Not completed: ${resultData.fixtures_not_completed}` : null,
-                                        resultData.fixtures_no_scores > 0 ? `No scores: ${resultData.fixtures_no_scores}` : null,
-                                    ].filter(Boolean).join(' | ')
-                                    setSyncMessage({ 
-                                        type: 'success', 
-                                        text: `Synced ${data.fixtures_updated || 0} scores. ${details}` 
-                                    })
-                                })
-                        })
-                        .catch(error => {
-                            setSyncMessage({ type: 'error', text: error.message || 'Failed to sync scores' })
-                        })
-                        .finally(() => {
-                            setSyncing(false)
-                            setTimeout(() => setSyncMessage(null), 5000)
-                        })
-                    }}
-                    disabled={syncing}
-                >
-                    Sync Scores
-                </Button>
                         <Button
                             variant="outlined"
                             color="secondary"
