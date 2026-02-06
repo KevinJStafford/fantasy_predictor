@@ -368,7 +368,7 @@ function Members() {
     return (
         <>
         <Navbar />
-        <Box component="div" sx={{ px: 2, pr: { xs: 2, sm: 3, md: 4 } }}>
+        <Box component="div" sx={{ px: 2, pr: { xs: 2, sm: 3, md: 4 }, pt: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Button 
@@ -389,18 +389,17 @@ function Members() {
                     </Button>
                 )}
             </Box>
-            <Typography variant="h5" component="h2"><span>Select Game Week:</span></Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Button 
-                    variant="contained" 
-                    color="primary"
-                    onClick={syncFixtures} 
-                    disabled={syncing}
-                >
-                    {syncing ? 'Syncing...' : 'Sync Fixtures'}
-                </Button>
                 {isAdmin && (
                     <>
+                        <Button 
+                            variant="contained" 
+                            color="primary"
+                            onClick={syncFixtures} 
+                            disabled={syncing}
+                        >
+                            {syncing ? 'Syncing...' : 'Sync Fixtures'}
+                        </Button>
                         <Button 
                             variant="outlined" 
                             color="primary"

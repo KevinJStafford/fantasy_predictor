@@ -140,7 +140,10 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
     }
 
     // Table row layout: Home | Score | Away | Score | Save (form attribute links inputs to form in last cell)
+    const hasExisting = !!existingPrediction
     const formId = `prediction-form-${id}`
+    const saveButtonLabel = saving ? 'Saving...' : gameStarted ? (asTableRow ? 'Locked' : 'Game Started') : (hasExisting ? 'Update' : (asTableRow ? 'Save' : 'Save Prediction'))
+    const saveButtonSx = hasExisting ? { backgroundColor: 'white', color: 'primary.main', borderColor: 'primary.main', '&:hover': { backgroundColor: 'grey.50', borderColor: 'primary.dark', color: 'primary.dark' } } : {}
     if (asTableRow) {
         return (
             <TableRow>
@@ -179,8 +182,15 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
                 <TableCell align="center" sx={{ width: 100 }}>
                     <form id={formId} onSubmit={formik.handleSubmit}>
-                        <Button type="submit" variant="contained" color="primary" size="small" disabled={saving || gameStarted}>
-                            {saving ? 'Saving...' : gameStarted ? 'Locked' : 'Save'}
+                        <Button
+                            type="submit"
+                            variant={hasExisting ? 'outlined' : 'contained'}
+                            color="primary"
+                            size="small"
+                            disabled={saving || gameStarted}
+                            sx={saveButtonSx}
+                        >
+                            {saveButtonLabel}
                         </Button>
                     </form>
                 </TableCell>
@@ -249,11 +259,12 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                             <Button
                                 fullWidth
                                 type="submit"
-                                variant="contained"
+                                variant={hasExisting ? 'outlined' : 'contained'}
+                                color="primary"
                                 disabled={saving || gameStarted}
-                                sx={{ mt: { xs: 0, md: 4 } }}
+                                sx={{ mt: { xs: 0, md: 4 }, ...saveButtonSx }}
                             >
-                                {saving ? 'Saving...' : gameStarted ? 'Game Started' : 'Save Prediction'}
+                                {saveButtonLabel}
                             </Button>
                         </Grid>
                     </Grid>
