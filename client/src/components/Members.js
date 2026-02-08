@@ -754,7 +754,7 @@ function Members() {
                                                 <TableCell>
                                                     <FormControl size="small" sx={{ minWidth: 100 }} disabled={updatingRoleId === m.id}>
                                                         <Select
-                                                            value={m.role || 'player'}
+                                                            value={m.role === 'admin' ? 'admin' : 'player'}
                                                             onChange={(e) => handleUpdateMemberRole(m.id, e.target.value)}
                                                             sx={{ height: 28, fontSize: '0.875rem' }}
                                                         >
