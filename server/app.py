@@ -2098,6 +2098,81 @@ def get_member_predictions_for_admin(league_id, member_user_id):
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/leagues/<int:league_id>/members/<int:member_user_id>/predictions', methods=['POST'])
+def admin_create_member_prediction(league_id, member_user_id):
+    """Admin only: create a prediction (or missed pick) for a league member. Body: { home_team, away_team, home_team_score, away_team_score }.
+    Use fixture's exact team names. If fixture is completed, game_result is set from scores."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can create predictions for members'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        if not get_league_membership(member_user_id, league_id):
+            return make_response({'error': 'User is not a member of this league'}, 404)
+        data = request.get_json() or {}
+        home_team = (data.get('home_team') or '').strip()
+        away_team = (data.get('away_team') or '').strip()
+        try:
+            home_team_score = int(data.get('home_team_score', 0))
+            away_team_score = int(data.get('away_team_score', 0))
+        except (TypeError, ValueError):
+            return make_response({'error': 'home_team_score and away_team_score must be integers'}, 400)
+        if not home_team or not away_team:
+            return make_response({'error': 'home_team and away_team are required'}, 400)
+        # Find fixture (case-insensitive)
+        fixture = Fixture.query.filter_by(
+            fixture_home_team=home_team,
+            fixture_away_team=away_team
+        ).first()
+        if not fixture:
+            for f in Fixture.query.all():
+                if (f.fixture_home_team or '').lower().strip() == home_team.lower() and (f.fixture_away_team or '').lower().strip() == away_team.lower():
+                    fixture = f
+                    break
+        if not fixture:
+            return make_response({'error': f'Fixture not found for {home_team} vs {away_team}'}, 404)
+        # Use fixture's exact names for the Game
+        f_home, f_away = fixture.fixture_home_team, fixture.fixture_away_team
+        existing = Game.query.filter_by(user_id=member_user_id, home_team=f_home, away_team=f_away).first()
+        if existing:
+            return make_response({'error': 'Member already has a prediction for this fixture; use PATCH to update', 'game_id': existing.id}, 400)
+        game = Game(
+            user_id=member_user_id,
+            home_team=f_home,
+            away_team=f_away,
+            home_team_score=home_team_score,
+            away_team_score=away_team_score,
+            game_week_name=f"Week {fixture.fixture_round}" if fixture.fixture_round else "Unknown Week",
+            game_week=fixture.fixture_date
+        )
+        if fixture.actual_home_score is not None and fixture.actual_away_score is not None:
+            pred_home, pred_away = game.home_team_score, game.away_team_score
+            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
+            if pred_home == actual_home and pred_away == actual_away:
+                game.game_result = 'Win'
+            else:
+                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+        db.session.add(game)
+        db.session.flush()
+        pred = Prediction.query.filter_by(user_id=member_user_id, game_id=game.id).first()
+        if not pred:
+            db.session.add(Prediction(user_id=member_user_id, game_id=game.id))
+        db.session.commit()
+        return make_response({'message': 'Prediction created', 'game': game.to_dict(), 'game_id': game.id}, 201)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating member prediction: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
 def get_league_leaderboard(league_id):
     """Get leaderboard for a league - players ordered by points"""
@@ -2144,7 +2219,27 @@ def get_league_leaderboard(league_id):
                     return f
             return None
 
-        # Combine backfill (imported table) with live W/D/L from scored predictions going forward
+        def _member_has_game_for_fixture(member_id, fixture):
+            """True if member has a Game (prediction) for this fixture."""
+            g = Game.query.filter_by(
+                user_id=member_id,
+                home_team=fixture.fixture_home_team,
+                away_team=fixture.fixture_away_team
+            ).first()
+            if g:
+                return True
+            for g in Game.query.filter_by(user_id=member_id).all():
+                if (g.home_team or '').lower().strip() == (fixture.fixture_home_team or '').lower().strip() and (g.away_team or '').lower().strip() == (fixture.fixture_away_team or '').lower().strip():
+                    return True
+            return False
+
+        # Completed fixtures = have both scores (missed pick counts as Loss)
+        completed_fixtures = Fixture.query.filter(
+            Fixture.actual_home_score.isnot(None),
+            Fixture.actual_away_score.isnot(None)
+        ).all()
+
+        # Combine backfill (imported table) with live W/D/L from scored predictions; missed picks = Loss
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
@@ -2164,6 +2259,17 @@ def get_league_leaderboard(league_id):
                 elif result == 'Draw':
                     draws += 1
                 elif result == 'Loss':
+                    losses += 1
+            # Missed pick = no prediction for a completed fixture in a round where they have at least one pick → count as Loss
+            rounds_with_pick = set()
+            for g in games:
+                fx = _fixture_for_game(g)
+                if fx and fx.fixture_round is not None:
+                    rounds_with_pick.add(fx.fixture_round)
+            for f in completed_fixtures:
+                if f.fixture_round not in rounds_with_pick:
+                    continue
+                if not _member_has_game_for_fixture(member.id, f):
                     losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
             total_games = wins + draws + losses

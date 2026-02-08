@@ -35,6 +35,10 @@ function Members() {
     const [adminSelectedMemberId, setAdminSelectedMemberId] = useState('')
     const [loadingMemberPredictions, setLoadingMemberPredictions] = useState(false)
     const [editPredictionDialog, setEditPredictionDialog] = useState(null) // { gameId, home_team, away_team, home_team_score, away_team_score }
+    const [addPredictionDialog, setAddPredictionDialog] = useState(null) // { home_team, away_team, home_team_score, away_team_score } for missed pick
+    const [adminPredictionRound, setAdminPredictionRound] = useState('')
+    const [adminFixturesForRound, setAdminFixturesForRound] = useState([])
+    const [loadingAdminFixtures, setLoadingAdminFixtures] = useState(false)
     const [backfillDialogOpen, setBackfillDialogOpen] = useState(false)
     const [backfillJson, setBackfillJson] = useState('')
     const [backfillMessage, setBackfillMessage] = useState(null)
@@ -414,6 +418,46 @@ function Members() {
                 setSyncMessage({ type: 'error', text: err.message || 'Failed to update prediction' })
                 setTimeout(() => setSyncMessage(null), 5000)
             })
+    }
+
+    function handleAdminCreatePrediction(memberUserId, home_team, away_team, home_team_score, away_team_score) {
+        if (!leagueId || !memberUserId) return
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/members/${memberUserId}/predictions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ home_team, away_team, home_team_score: Number(home_team_score), away_team_score: Number(away_team_score) })
+        })
+            .then(res => {
+                if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to add prediction') })
+                setAddPredictionDialog(null)
+                handleFetchMemberPredictions(adminSelectedMemberId)
+                if (adminPredictionRound) getAdminFixturesForRound(Number(adminPredictionRound))
+                fetchLeaderboard()
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to add prediction' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+    }
+
+    function getAdminFixturesForRound(roundNum) {
+        if (roundNum == null || roundNum === '') {
+            setAdminFixturesForRound([])
+            return
+        }
+        setLoadingAdminFixtures(true)
+        fetch(apiUrl(`/api/v1/fixtures/${roundNum}`))
+            .then(res => res.ok ? res.json() : [])
+            .then(data => {
+                const list = Array.isArray(data) ? data : []
+                setAdminFixturesForRound([...list].sort((a, b) => {
+                    const ad = a?.fixture_date ? new Date(a.fixture_date).getTime() : 0
+                    const bd = b?.fixture_date ? new Date(b.fixture_date).getTime() : 0
+                    return ad - bd
+                }))
+            })
+            .catch(() => setAdminFixturesForRound([]))
+            .finally(() => setLoadingAdminFixtures(false))
     }
 
     // Load available rounds and predictions on mount
@@ -806,67 +850,115 @@ function Members() {
                         </Box>
                     )}
 
-                    {/* Admin: Edit member prediction */}
+                    {/* Admin: Edit member prediction + add missed pick */}
                     {isAdmin && leagueMembers.length > 0 && (
                         <Box sx={{ mb: 3 }}>
                             <Typography variant="h6" component="h3" sx={{ mb: 1 }}>Admin: Edit member prediction</Typography>
-                            <FormControl size="small" sx={{ minWidth: 200, mb: 2 }}>
-                                <InputLabel>Select member</InputLabel>
-                                <Select
-                                    value={adminSelectedMemberId}
-                                    label="Select member"
-                                    onChange={(e) => {
-                                        const id = e.target.value
-                                        setAdminSelectedMemberId(id)
-                                        if (id) handleFetchMemberPredictions(Number(id))
-                                        else setAdminMemberPredictions([])
-                                    }}
-                                >
-                                    <MenuItem value="">—</MenuItem>
-                                    {leagueMembers.map((m) => (
-                                        <MenuItem key={m.id} value={String(m.id)}>{m.display_name}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
+                                <FormControl size="small" sx={{ minWidth: 200 }}>
+                                    <InputLabel>Select member</InputLabel>
+                                    <Select
+                                        value={adminSelectedMemberId}
+                                        label="Select member"
+                                        onChange={(e) => {
+                                            const id = e.target.value
+                                            setAdminSelectedMemberId(id)
+                                            if (id) handleFetchMemberPredictions(Number(id))
+                                            else setAdminMemberPredictions([])
+                                        }}
+                                    >
+                                        <MenuItem value="">—</MenuItem>
+                                        {leagueMembers.map((m) => (
+                                            <MenuItem key={m.id} value={String(m.id)}>{m.display_name}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                                <FormControl size="small" sx={{ minWidth: 140 }}>
+                                    <InputLabel>Game week</InputLabel>
+                                    <Select
+                                        value={adminPredictionRound || ''}
+                                        label="Game week"
+                                        onChange={(e) => {
+                                            const r = e.target.value
+                                            setAdminPredictionRound(r)
+                                            if (r) getAdminFixturesForRound(Number(r))
+                                            else setAdminFixturesForRound([])
+                                        }}
+                                    >
+                                        <MenuItem value="">—</MenuItem>
+                                        {availableRounds.map((r) => (
+                                            <MenuItem key={r} value={String(r)}>Week {r}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            </Box>
                             {loadingMemberPredictions ? (
                                 <Typography variant="body2">Loading predictions...</Typography>
-                            ) : adminMemberPredictions.length > 0 ? (
-                                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 280, overflow: 'auto' }}>
+                            ) : adminSelectedMemberId && adminPredictionRound && adminFixturesForRound.length > 0 ? (
+                                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 320, overflow: 'auto' }}>
                                     <Table size="small" stickyHeader>
                                         <TableHead>
                                             <TableRow>
                                                 <TableCell>Match</TableCell>
                                                 <TableCell align="center">Pred</TableCell>
-                                                <TableCell align="right">Edit</TableCell>
+                                                <TableCell align="right">Action</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-                                            {adminMemberPredictions.map((pred) => (
-                                                <TableRow key={pred.id}>
-                                                    <TableCell>{pred.home_team} vs {pred.away_team}</TableCell>
-                                                    <TableCell align="center">{pred.home_team_score ?? '–'}–{pred.away_team_score ?? '–'}</TableCell>
-                                                    <TableCell align="right">
-                                                        <IconButton
-                                                            size="small"
-                                                            aria-label="Edit prediction"
-                                                            onClick={() => setEditPredictionDialog({
-                                                                gameId: pred.id,
-                                                                home_team: pred.home_team,
-                                                                away_team: pred.away_team,
-                                                                home_team_score: pred.home_team_score ?? 0,
-                                                                away_team_score: pred.away_team_score ?? 0
-                                                            })}
-                                                        >
-                                                            <EditIcon fontSize="small" />
-                                                        </IconButton>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
+                                            {adminFixturesForRound.map((fix) => {
+                                                const home = fix.fixture_home_team || fix.home_team || ''
+                                                const away = fix.fixture_away_team || fix.away_team || ''
+                                                const pred = adminMemberPredictions.find(
+                                                    p => (p.home_team || '').toLowerCase() === home.toLowerCase() && (p.away_team || '').toLowerCase() === away.toLowerCase()
+                                                )
+                                                return (
+                                                    <TableRow key={fix.id || `${home}-${away}`}>
+                                                        <TableCell>{home} vs {away}</TableCell>
+                                                        <TableCell align="center">
+                                                            {pred ? `${pred.home_team_score ?? '–'}–${pred.away_team_score ?? '–'}` : <Typography variant="body2" color="text.secondary">No pick (Loss)</Typography>}
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            {pred ? (
+                                                                <IconButton
+                                                                    size="small"
+                                                                    aria-label="Edit prediction"
+                                                                    onClick={() => setEditPredictionDialog({
+                                                                        gameId: pred.id,
+                                                                        home_team: pred.home_team,
+                                                                        away_team: pred.away_team,
+                                                                        home_team_score: pred.home_team_score ?? 0,
+                                                                        away_team_score: pred.away_team_score ?? 0
+                                                                    })}
+                                                                >
+                                                                    <EditIcon fontSize="small" />
+                                                                </IconButton>
+                                                            ) : (
+                                                                <Button
+                                                                    size="small"
+                                                                    variant="outlined"
+                                                                    onClick={() => setAddPredictionDialog({
+                                                                        home_team: home,
+                                                                        away_team: away,
+                                                                        home_team_score: 0,
+                                                                        away_team_score: 0
+                                                                    })}
+                                                                >
+                                                                    Add prediction
+                                                                </Button>
+                                                            )}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )
+                                            })}
                                         </TableBody>
                                     </Table>
                                 </TableContainer>
+                            ) : adminSelectedMemberId && adminPredictionRound && !loadingAdminFixtures && adminFixturesForRound.length === 0 ? (
+                                <Typography variant="body2" color="text.secondary">No fixtures for this week.</Typography>
+                            ) : adminSelectedMemberId && !adminPredictionRound ? (
+                                <Typography variant="body2" color="text.secondary">Select a game week to view or add predictions.</Typography>
                             ) : adminSelectedMemberId ? (
-                                <Typography variant="body2" color="text.secondary">No predictions yet.</Typography>
+                                <Typography variant="body2" color="text.secondary">Select a member and game week to edit or add missed picks.</Typography>
                             ) : null}
                         </Box>
                     )}
@@ -994,6 +1086,52 @@ function Members() {
                                 editPredictionDialog.gameId,
                                 editPredictionDialog.home_team_score,
                                 editPredictionDialog.away_team_score
+                            )}
+                        >
+                            Save
+                        </Button>
+                    </DialogActions>
+                </>
+            )}
+        </Dialog>
+
+        {/* Add prediction for missed pick (admin) */}
+        <Dialog open={!!addPredictionDialog} onClose={() => setAddPredictionDialog(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>Add prediction (missed pick)</DialogTitle>
+            {addPredictionDialog && (
+                <>
+                    <DialogContent>
+                        <Typography variant="body2" sx={{ mb: 2 }}>{addPredictionDialog.home_team} vs {addPredictionDialog.away_team}</Typography>
+                        <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 2 }}>Enter the score to record for this member. It will be scored as Win/Draw/Loss if the fixture has results.</Typography>
+                        <TextField
+                            label="Home score"
+                            type="number"
+                            inputProps={{ min: 0 }}
+                            value={addPredictionDialog.home_team_score}
+                            onChange={(e) => setAddPredictionDialog(prev => ({ ...prev, home_team_score: e.target.value }))}
+                            fullWidth
+                            sx={{ mb: 2 }}
+                        />
+                        <TextField
+                            label="Away score"
+                            type="number"
+                            inputProps={{ min: 0 }}
+                            value={addPredictionDialog.away_team_score}
+                            onChange={(e) => setAddPredictionDialog(prev => ({ ...prev, away_team_score: e.target.value }))}
+                            fullWidth
+                        />
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setAddPredictionDialog(null)}>Cancel</Button>
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            onClick={() => handleAdminCreatePrediction(
+                                Number(adminSelectedMemberId),
+                                addPredictionDialog.home_team,
+                                addPredictionDialog.away_team,
+                                addPredictionDialog.home_team_score,
+                                addPredictionDialog.away_team_score
                             )}
                         >
                             Save
