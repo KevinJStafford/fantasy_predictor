@@ -359,6 +359,28 @@ function Members() {
             .finally(() => setRemovingMemberId(null))
     }
 
+    function handleUpdateMemberRole(memberUserId, newRole) {
+        if (!leagueId || !newRole) return
+        setUpdatingRoleId(memberUserId)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/members/${memberUserId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: newRole })
+        })
+            .then(res => {
+                if (res.ok) {
+                    refreshLeagueDetail()
+                } else {
+                    return res.json().then(data => { throw new Error(data.error || 'Failed to update role') })
+                }
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to update role' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+            .finally(() => setUpdatingRoleId(null))
+    }
+
     function handleFetchMemberPredictions(memberUserId) {
         if (!leagueId || !memberUserId) return
         setLoadingMemberPredictions(true)
