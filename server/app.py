@@ -2142,8 +2142,8 @@ def get_league_leaderboard(league_id):
                 'total_games': total_games,
             })
         
-        # Sort by points (descending), then by wins, then by draws
-        leaderboard.sort(key=lambda x: (x['points'], x['wins'], x['draws']), reverse=True)
+        # Sort by points (descending), then by fewest losses first, then wins, then draws
+        leaderboard.sort(key=lambda x: (x['points'], -x['losses'], x['wins'], x['draws']), reverse=True)
         
         return make_response({'leaderboard': leaderboard}, 200)
     except Exception as e:
