@@ -552,6 +552,76 @@ function Members() {
                                 No fixtures found for week {gameWeek}. Please sync fixtures first.
                             </Typography>
                         )}
+
+                        {/* Results table - below predictions on desktop */}
+                        {gameWeek && (
+                            <Box sx={{ mt: 3, display: { xs: 'none', md: 'block' } }}>
+                                <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
+                                    Results - Week {gameWeek}
+                                </Typography>
+                                {loadingPredictions ? (
+                                    <Typography variant="body2">Loading results...</Typography>
+                                ) : (() => {
+                                    const selectedRound = parseInt(gameWeek)
+                                    const completedPredictions = predictions
+                                        .filter(p => {
+                                            if (!p.fixture) return false
+                                            if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
+                                            return (p.fixture.round === selectedRound)
+                                        })
+                                        .sort((a, b) => {
+                                            const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
+                                            const dateB = b.fixture?.date ? new Date(b.fixture.date).getTime() : 0
+                                            return dateA - dateB
+                                        })
+                                    if (completedPredictions.length === 0) {
+                                        return (
+                                            <Typography variant="body2" sx={{ mt: 2 }}>
+                                                No completed predictions for this week yet.
+                                            </Typography>
+                                        )
+                                    }
+                                    const wins = completedPredictions.filter(p => p.game_result === 'Win').length
+                                    const draws = completedPredictions.filter(p => p.game_result === 'Draw').length
+                                    const losses = completedPredictions.filter(p => p.game_result === 'Loss').length
+                                    return (
+                                        <>
+                                            <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                                <Chip label={`W: ${wins}`} color="success" size="small" />
+                                                <Chip label={`D: ${draws}`} color="warning" size="small" />
+                                                <Chip label={`L: ${losses}`} color="error" size="small" />
+                                            </Box>
+                                            <Box>
+                                                {completedPredictions.map((prediction) => {
+                                                    const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
+                                                    let resultColor = 'default'
+                                                    if (game_result === 'Win') resultColor = 'success'
+                                                    else if (game_result === 'Draw') resultColor = 'warning'
+                                                    else if (game_result === 'Loss') resultColor = 'error'
+                                                    return (
+                                                        <Card key={prediction.id} sx={{ mb: 1.5 }}>
+                                                            <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                                                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                                                                    <Typography variant="subtitle2">Week {fixture?.round || 'N/A'}</Typography>
+                                                                    <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
+                                                                </Box>
+                                                                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                                                    {home_team} vs {away_team}
+                                                                </Typography>
+                                                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                                                    <Typography variant="caption">Pred: {home_team_score}-{away_team_score}</Typography>
+                                                                    <Typography variant="caption" color="textSecondary">Actual: {fixture.actual_home_score}-{fixture.actual_away_score}</Typography>
+                                                                </Box>
+                                                            </CardContent>
+                                                        </Card>
+                                                    )
+                                                })}
+                                            </Box>
+                                        </>
+                                    )
+                                })()}
+                            </Box>
+                        )}
                     </>
                 ) : (
                     <Typography variant="body1" sx={{ mt: 2 }}>
@@ -560,7 +630,7 @@ function Members() {
                 )}
             </Grid>
 
-            {/* Right side: Premier League table + Leaderboard + Results (with padding from edge) */}
+            {/* Right side: Premier League table + Leaderboard (Results shown below predictions on desktop) */}
             <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
                 {/* Premier League table (real standings for reference) - no horizontal padding so table aligns with prediction table */}
                 <Card variant="outlined" sx={{ mb: 2 }}>
@@ -769,9 +839,9 @@ function Members() {
                         </Box>
                     )}
 
-                    {/* Results Section for Selected Week (below leaderboard) - check-results runs automatically on page load */}
+                    {/* Results Section - mobile only (on desktop shown below predictions in left column) */}
                     {gameWeek && (
-                        <Box sx={{ mt: 3 }}>
+                        <Box sx={{ mt: 3, display: { xs: 'block', md: 'none' } }}>
                             <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
                                 Results - Week {gameWeek}
                             </Typography>
