@@ -30,6 +30,7 @@ function Members() {
     const [leagueDetail, setLeagueDetail] = useState(null)
     const [deleteLeagueDialog, setDeleteLeagueDialog] = useState(false)
     const [removingMemberId, setRemovingMemberId] = useState(null)
+    const [updatingRoleId, setUpdatingRoleId] = useState(null)
     const [adminMemberPredictions, setAdminMemberPredictions] = useState([])
     const [adminSelectedMemberId, setAdminSelectedMemberId] = useState('')
     const [loadingMemberPredictions, setLoadingMemberPredictions] = useState(false)
@@ -751,7 +752,16 @@ function Members() {
                                             <TableRow key={m.id}>
                                                 <TableCell>{m.display_name}</TableCell>
                                                 <TableCell>
-                                                    <Chip label={m.role} size="small" color={m.role === 'admin' ? 'primary' : 'default'} />
+                                                    <FormControl size="small" sx={{ minWidth: 100 }} disabled={updatingRoleId === m.id}>
+                                                        <Select
+                                                            value={m.role || 'player'}
+                                                            onChange={(e) => handleUpdateMemberRole(m.id, e.target.value)}
+                                                            sx={{ height: 28, fontSize: '0.875rem' }}
+                                                        >
+                                                            <MenuItem value="player">Player</MenuItem>
+                                                            <MenuItem value="admin">Admin</MenuItem>
+                                                        </Select>
+                                                    </FormControl>
                                                 </TableCell>
                                                 <TableCell align="right">
                                                     {Number(m.id) !== Number(currentUser?.id) && (

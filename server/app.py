@@ -1914,6 +1914,41 @@ def join_league_by_code():
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/leagues/<int:league_id>/members/<int:member_user_id>', methods=['PATCH'])
+def update_league_member_role(league_id, member_user_id):
+    """Update a member's role (admin or player). League admin only. Body: { \"role\": \"admin\" | \"player\" }."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can update member roles'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        membership = get_league_membership(member_user_id, league_id)
+        if not membership:
+            return make_response({'error': 'Member not in this league'}, 404)
+        data = request.get_json() or {}
+        role = (data.get('role') or '').strip().lower()
+        if role not in ('admin', 'player'):
+            return make_response({'error': 'role must be "admin" or "player"'}, 400)
+        # If demoting self to player, ensure at least one other admin remains
+        if member_user_id == user_id and role == 'player':
+            admin_count = sum(1 for lm in league.league_memberships if lm.role == 'admin')
+            if admin_count <= 1:
+                return make_response({'error': 'Cannot demote the last admin. Promote another member to admin first.'}, 400)
+        membership.role = role
+        db.session.commit()
+        return make_response({'message': 'Role updated', 'role': membership.role}, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating member role: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/leagues/<int:league_id>/members/<int:member_user_id>', methods=['DELETE'])
 def remove_league_member(league_id, member_user_id):
     """Remove a member from the league. Admin only."""
