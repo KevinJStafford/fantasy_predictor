@@ -1,12 +1,13 @@
 services:
-  # Backend API Service
+  # Backend API Service (Root Directory = server so build/start run from server/)
   - type: web
     name: fantasy-predictor-api
     env: python
     plan: free
     pythonVersion: 3.11
-    buildCommand: pip install -r requirements.txt && cd server && flask db upgrade
-    startCommand: cd server && gunicorn app:app --bind 0.0.0.0:$PORT
+    rootDir: server
+    buildCommand: pip install -r requirements.txt && flask db upgrade
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: FLASK_APP
         value: app.py

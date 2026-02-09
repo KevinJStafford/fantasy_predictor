@@ -25,13 +25,14 @@ FLASK_ENV = os.getenv('FLASK_ENV', 'development')
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///app.db')
 
+# Render/Heroku often give postgres:// but SQLAlchemy 1.4+ expects postgresql://
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = 'postgresql://' + DATABASE_URL[len('postgres://'):]
+
 # Database configuration
-# Handle both SQLite and PostgreSQL URLs
-if DATABASE_URL.startswith('postgresql://') or DATABASE_URL.startswith('postgres://'):
-    # PostgreSQL - use as-is
+if DATABASE_URL.startswith('postgresql://'):
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 else:
-    # SQLite - use as-is
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -40,7 +41,10 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_recycle': 300,
 }
 app.json.compact = False
-app.secret_key = SECRET_KEY.encode() if isinstance(SECRET_KEY, str) else SECRET_KEY
+if not SECRET_KEY or (isinstance(SECRET_KEY, str) and not SECRET_KEY.strip()):
+    if FLASK_ENV == 'production':
+        raise ValueError('SECRET_KEY must be set in production (e.g. set in Render Environment)')
+app.secret_key = SECRET_KEY.encode('utf-8') if isinstance(SECRET_KEY, str) else SECRET_KEY
 
 # Session cookie configuration
 # For cross-domain auth, we'll use token-based auth instead of cookies

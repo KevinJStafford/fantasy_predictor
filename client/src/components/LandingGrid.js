@@ -33,16 +33,19 @@ const SAMPLE_FIXTURES = [
     { home: 'Manchester United', away: 'Everton', day: 'Sunday' },
 ];
 
-const SAMPLE_LEADERBOARD = [
-    { rank: 1, name: 'Gina' },
-    { rank: 2, name: 'Jaclyn' },
-    { rank: 3, name: 'Henry' },
-    { rank: 4, name: 'Kevin' },
+const LEADERBOARD_NAMES = [
+    'Alex', 'Jordan', 'Sam', 'Morgan', 'Riley', 'Casey', 'Quinn', 'Avery',
+    'Jamie', 'Drew', 'Skyler', 'Parker', 'Reese', 'Cameron', 'Blair', 'Finley',
 ];
+function getRandomLeaderboardNames(count = 4) {
+    const shuffled = [...LEADERBOARD_NAMES].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count).map((name, i) => ({ rank: i + 1, name }));
+}
 
 function LandingGrid() {
     const history = useHistory();
     const [fixtures, setFixtures] = React.useState(SAMPLE_FIXTURES);
+    const leaderboardNames = React.useMemo(() => getRandomLeaderboardNames(4), []);
 
     React.useEffect(() => {
         fetch(apiUrl('/api/v1/fixtures/current-round'))
@@ -102,20 +105,26 @@ function LandingGrid() {
                         }}
                     >
                         <TableContainer>
-                            <Table size="small" sx={{ '& td, & th': { borderColor: 'rgba(255,255,255,0.2)', color: 'white' } }}>
+                            <Table
+                                size="small"
+                                sx={{
+                                    tableLayout: 'fixed',
+                                    '& td, & th': { borderColor: 'rgba(255,255,255,0.2)', color: 'white', verticalAlign: 'middle' },
+                                }}
+                            >
                                 <TableHead>
-                                    <TableRow>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Home</TableCell>
-                                        <TableCell align="center" sx={{ fontWeight: 700, width: 100 }}>Score</TableCell>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '1rem' }}>Away</TableCell>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'rgba(255,255,255,0.9)' }}>Day/Time</TableCell>
+                                    <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.2)' }}>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem', width: '28%' }}>Home</TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.95rem', width: '22%' }}>Score</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem', width: '28%' }}>Away</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'rgba(255,255,255,0.95)', width: '22%' }}>Day/Time</TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
                                     {fixtures.slice(0, 8).map((row, i) => (
-                                        <TableRow key={i}>
-                                            <TableCell>{row.home}</TableCell>
-                                            <TableCell align="center">
+                                        <TableRow key={i} sx={{ '&:nth-of-type(even)': { bgcolor: 'rgba(0,0,0,0.08)' } }}>
+                                            <TableCell sx={{ fontSize: '0.9rem' }}>{row.home}</TableCell>
+                                            <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
                                                 <InputBase
                                                     sx={{
                                                         width: 36,
@@ -144,7 +153,7 @@ function LandingGrid() {
                                                     inputProps={{ style: { textAlign: 'center' } }}
                                                 />
                                             </TableCell>
-                                            <TableCell>{row.away}</TableCell>
+                                            <TableCell sx={{ fontSize: '0.9rem' }}>{row.away}</TableCell>
                                             <TableCell sx={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.8rem' }}>
                                                 {row.day}
                                                 {row.time ? ` ${row.time}` : ''}
@@ -220,27 +229,26 @@ function LandingGrid() {
                 </Box>
             </Box>
 
-            {/* Section 2: Match list background with two red promo banners */}
+            {/* Section 2: Match list background with two red promo banners - overflow hidden so background doesn't bleed into section 3 */}
             <Box
                 sx={{
                     position: 'relative',
                     minHeight: 380,
+                    overflow: 'hidden',
                     backgroundColor: '#fff',
                     py: 6,
                     px: 2,
                 }}
             >
-                {/* Background match list (faded) */}
+                {/* Background match list (faded) - contained within this section only */}
                 <Box
                     sx={{
                         position: 'absolute',
-                        left: 0,
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
+                        inset: 0,
                         opacity: 0.25,
                         py: 4,
                         px: 3,
+                        overflow: 'hidden',
                     }}
                 >
                     <TableContainer>
@@ -408,7 +416,7 @@ function LandingGrid() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {SAMPLE_LEADERBOARD.map((row) => (
+                                    {leaderboardNames.map((row) => (
                                         <TableRow key={row.rank} sx={{ '&:not(:last-child) td': { borderBottom: '1px solid', borderColor: 'divider' } }}>
                                             <TableCell sx={{ fontWeight: 700 }}>#{row.rank}</TableCell>
                                             <TableCell>{row.name}</TableCell>

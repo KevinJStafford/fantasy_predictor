@@ -122,11 +122,12 @@ If migrations didn't run during build, you can trigger them manually:
 
 ## Troubleshooting
 
-### Backend won't start
-- Check the **Logs** tab in Render
-- Ensure `requirements.txt` has all dependencies
-- Verify `gunicorn` is in requirements.txt
-- Check that `DATABASE_URL` is set correctly
+### Backend won't start / "Exited with status 1"
+- Open your backend service → **Logs** tab and scroll to the **bottom** of the latest deploy. The real error (e.g. `ModuleNotFoundError`, `SECRET_KEY must be set`, database connection) appears there.
+- **Root Directory**: If set to `server`, use Build Command `pip install -r requirements.txt && flask db upgrade` and Start Command `gunicorn app:app --bind 0.0.0.0:$PORT` (no `cd server`).
+- **SECRET_KEY**: Must be set in Environment (Render can "Generate" it). If missing, the app will fail with a clear message in logs.
+- **DATABASE_URL**: Use the **Internal** database URL. The app converts `postgres://` to `postgresql://` automatically.
+- Ensure `gunicorn` and `psycopg2-binary` are in `server/requirements.txt` (or root `requirements.txt` if not using Root Directory).
 
 ### Database connection errors
 - Verify `DATABASE_URL` uses the **Internal Database URL** (not external)
