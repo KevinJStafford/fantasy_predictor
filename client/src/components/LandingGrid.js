@@ -10,7 +10,6 @@ import {
     TableHead,
     TableRow,
     Paper,
-    InputBase,
 } from '@mui/material';
 import { useHistory } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
@@ -104,57 +103,30 @@ function LandingGrid() {
                             maxWidth: 560,
                         }}
                     >
-                        <TableContainer>
+                        <TableContainer sx={{ overflowX: 'auto', overflowY: 'visible', maxWidth: '100%' }}>
                             <Table
                                 size="small"
                                 sx={{
                                     tableLayout: 'fixed',
+                                    minWidth: 280,
                                     '& td, & th': { borderColor: 'rgba(255,255,255,0.2)', color: 'white', verticalAlign: 'middle' },
                                 }}
                             >
                                 <TableHead>
                                     <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.2)' }}>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem', width: '28%' }}>Home</TableCell>
-                                        <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.95rem', width: '22%' }}>Score</TableCell>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem', width: '28%' }}>Away</TableCell>
-                                        <TableCell sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'rgba(255,255,255,0.95)', width: '22%' }}>Day/Time</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.8rem', sm: '0.95rem' }, width: '28%' }}>Home</TableCell>
+                                        <TableCell align="center" sx={{ fontWeight: 700, fontSize: { xs: '0.8rem', sm: '0.95rem' }, width: '22%' }}>Score</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.8rem', sm: '0.95rem' }, width: '28%' }}>Away</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, fontSize: { xs: '0.7rem', sm: '0.85rem' }, color: 'rgba(255,255,255,0.95)', width: '22%' }}>Day/Time</TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
                                     {fixtures.slice(0, 8).map((row, i) => (
                                         <TableRow key={i} sx={{ '&:nth-of-type(even)': { bgcolor: 'rgba(0,0,0,0.08)' } }}>
-                                            <TableCell sx={{ fontSize: '0.9rem' }}>{row.home}</TableCell>
-                                            <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
-                                                <InputBase
-                                                    sx={{
-                                                        width: 36,
-                                                        height: 32,
-                                                        bgcolor: 'white',
-                                                        borderRadius: 1,
-                                                        px: 1,
-                                                        textAlign: 'center',
-                                                        fontSize: '0.875rem',
-                                                    }}
-                                                    placeholder="–"
-                                                    inputProps={{ style: { textAlign: 'center' } }}
-                                                />
-                                                <Typography component="span" sx={{ mx: 0.5, color: 'white' }}>–</Typography>
-                                                <InputBase
-                                                    sx={{
-                                                        width: 36,
-                                                        height: 32,
-                                                        bgcolor: 'white',
-                                                        borderRadius: 1,
-                                                        px: 1,
-                                                        textAlign: 'center',
-                                                        fontSize: '0.875rem',
-                                                    }}
-                                                    placeholder="–"
-                                                    inputProps={{ style: { textAlign: 'center' } }}
-                                                />
-                                            </TableCell>
-                                            <TableCell sx={{ fontSize: '0.9rem' }}>{row.away}</TableCell>
-                                            <TableCell sx={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.8rem' }}>
+                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.9rem' }, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.home}</TableCell>
+                                            <TableCell align="center" sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem' }, color: 'rgba(255,255,255,0.9)' }}>– –</TableCell>
+                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.9rem' }, overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.away}</TableCell>
+                                            <TableCell sx={{ color: 'rgba(255,255,255,0.9)', fontSize: { xs: '0.65rem', sm: '0.8rem' } }}>
                                                 {row.day}
                                                 {row.time ? ` ${row.time}` : ''}
                                             </TableCell>
