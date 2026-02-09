@@ -277,6 +277,21 @@ class Users(Resource):
             user = User(email=email)
             user.password_hash = pw
             db.session.add(user)
+            db.session.flush()
+            # Add new user to all open leagues (display name = email local part, unique per league)
+            display_base = email.split('@')[0].strip() or 'Player'
+            if not display_base or len(display_base) < 2:
+                display_base = 'Player'
+            open_leagues = League.query.filter_by(is_open=True).all()
+            for league in open_leagues:
+                if LeagueMembership.query.filter_by(league_id=league.id, user_id=user.id).first():
+                    continue
+                display_name = display_base
+                suffix = 0
+                while LeagueMembership.query.filter_by(league_id=league.id, display_name=display_name).first():
+                    suffix += 1
+                    display_name = f"{display_base}_{suffix}"
+                db.session.add(LeagueMembership(user_id=user.id, league_id=league.id, display_name=display_name, role='player'))
             db.session.commit()
             session['user_id'] = user.id
             token = generate_token(user.id)
@@ -1779,6 +1794,35 @@ def reset_password():
 def index():
     return '<h1>Project Server</h1>'
 
+@app.route('/api/v1/leagues/open', methods=['GET'])
+def get_open_leagues():
+    """List leagues that are open to anyone. Optional query param q= for search by league name. Auth required."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        q = (request.args.get('q') or '').strip()
+        query = League.query.filter_by(is_open=True)
+        if q:
+            query = query.filter(League.name.ilike(f'%{q}%'))
+        leagues = query.order_by(League.name.asc()).limit(100).all()
+        out = []
+        for league in leagues:
+            out.append({
+                'id': league.id,
+                'name': league.name,
+                'is_open': getattr(league, 'is_open', False),
+                'is_member': bool(get_league_membership(user_id, league.id)),
+                'member_count': len(league.league_memberships),
+            })
+        return make_response({'leagues': out}, 200)
+    except Exception as e:
+        print(f"Error fetching open leagues: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/leagues', methods=['GET'])
 def get_user_leagues():
     """Get all leagues the current user is a member of"""
@@ -1811,9 +1855,10 @@ def create_league():
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
-        data = request.get_json()
+        data = request.get_json() or {}
         league_name = (data.get('name') or '').strip()
         display_name = (data.get('display_name') or '').strip()
+        is_open = data.get('is_open') in (True, 'true', 1, '1')
         if not league_name:
             return make_response({'error': 'League name is required'}, 400)
         if not display_name:
@@ -1827,7 +1872,7 @@ def create_league():
             if not existing:
                 break
         
-        league = League(name=league_name, invite_code=invite_code, created_by=user_id)
+        league = League(name=league_name, invite_code=invite_code, is_open=is_open, created_by=user_id)
         db.session.add(league)
         db.session.flush()
         

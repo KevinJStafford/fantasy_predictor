@@ -135,6 +135,7 @@ class League(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
     invite_code = db.Column(db.String, unique=True, nullable=False)
+    is_open = db.Column(db.Boolean, nullable=False, default=False)  # True = anyone can find and join; False = invite only
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -149,6 +150,7 @@ class League(db.Model, SerializerMixin):
             'id': self.id,
             'name': self.name,
             'invite_code': self.invite_code,
+            'is_open': getattr(self, 'is_open', False),
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

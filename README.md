@@ -55,14 +55,27 @@ React Frontend  →  Flask REST API  →  Database
 
 ### Backend Setup (Flask)
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\\Scripts\\activate
-pip install -r requirements.txt
+This project uses **Pipenv** (see `Pipfile` in the repo root). Flask is installed in the Pipenv environment, so the `flask` command is only available when that environment is active.
 
-flask run
+**From the project root:**
+
+```bash
+pipenv install
+cd server
+FLASK_APP=app.py pipenv run flask run
 ```
+
+Or activate the shell first, then run any Flask commands:
+
+```bash
+pipenv shell
+cd server
+export FLASK_APP=app.py
+flask run
+flask db upgrade   # run migrations
+```
+
+If you see "flask: command not found" in the `server` folder, you're not in the Pipenv environment—run the commands above from the repo root using `pipenv run` or after `pipenv shell`.
 
 By default the API will be available at:
 
