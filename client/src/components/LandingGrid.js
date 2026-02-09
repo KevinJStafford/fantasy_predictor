@@ -345,7 +345,7 @@ function LandingGrid() {
                         <Typography component="div" sx={{ color: 'white', fontSize: '1rem', lineHeight: 2 }}>
                             • <Box component="span" sx={{ fontWeight: 700 }}>Win 3 points</Box> – Perfect score prediction<br />
                             • <Box component="span" sx={{ fontWeight: 700 }}>Draw 1 point</Box> – Correct outcome; wrong scores<br />
-                            • <Box component="span" sx={{ fontWeight: 700 }}>Lose 0 points</Box> – Try harder!
+                            • <Box component="span" sx={{ fontWeight: 700 }}>Loss 0 points</Box> – Try harder!
                         </Typography>
                     </Box>
                 </Box>
