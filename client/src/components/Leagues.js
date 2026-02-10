@@ -1,7 +1,7 @@
 import * as React from 'react'
 import Navbar from './Navbar'
 import {useEffect, useState, useCallback} from 'react'
-import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControlLabel, Radio, RadioGroup } from '@mui/material'
+import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControlLabel, Radio, RadioGroup, Link } from '@mui/material'
 import { useHistory } from 'react-router-dom'
 import { authenticatedFetch, apiUrl } from '../utils/api'
 
@@ -25,17 +25,29 @@ function Leagues() {
     const [joinOpenLeagueId, setJoinOpenLeagueId] = useState(null)
     const [joinOpenDisplayName, setJoinOpenDisplayName] = useState('')
     const [joinOpenError, setJoinOpenError] = useState(null)
+    const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+    const [accountEmail, setAccountEmail] = useState('')
+    const [accountCurrentPassword, setAccountCurrentPassword] = useState('')
+    const [accountNewPassword, setAccountNewPassword] = useState('')
+    const [accountConfirmPassword, setAccountConfirmPassword] = useState('')
+    const [accountError, setAccountError] = useState(null)
+    const [accountSuccess, setAccountSuccess] = useState(null)
+    const [accountSaving, setAccountSaving] = useState(false)
     const history = useHistory()
 
     useEffect(() => {
         fetchLeagues()
     }, [])
 
-    useEffect(() => {
+    function fetchCurrentUser() {
         authenticatedFetch('/api/v1/authorized')
             .then(res => (res.ok ? res.json() : null))
             .then(user => setCurrentUser(user))
             .catch(() => setCurrentUser(null))
+    }
+
+    useEffect(() => {
+        fetchCurrentUser()
     }, [])
 
     function fetchLeagues() {
@@ -50,6 +62,8 @@ function Leagues() {
             })
             .then(data => {
                 setLeagues(data.leagues || [])
+                // Refetch current user after successful leagues load so "Signed in as" always has email
+                fetchCurrentUser()
             })
             .catch(error => {
                 console.error('Error fetching leagues:', error)
@@ -188,6 +202,78 @@ function Leagues() {
             .catch(() => setJoinOpenError('Failed to join league. Please try again.'))
     }
 
+    function handleOpenAccountDialog() {
+        setAccountDialogOpen(true)
+        setAccountEmail(currentUser?.email || '')
+        setAccountCurrentPassword('')
+        setAccountNewPassword('')
+        setAccountConfirmPassword('')
+        setAccountError(null)
+        setAccountSuccess(null)
+        // If we don't have email yet, refetch so the form shows it
+        if (!currentUser?.email) {
+            authenticatedFetch('/api/v1/authorized')
+                .then(res => (res.ok ? res.json() : null))
+                .then(user => {
+                    if (user) {
+                        setCurrentUser(user)
+                        if (user.email) setAccountEmail(user.email)
+                    }
+                })
+                .catch(() => {})
+        }
+    }
+
+    function handleAccountSubmit() {
+        const newEmail = accountEmail.trim().toLowerCase()
+        const hasEmailChange = newEmail && newEmail !== (currentUser?.email || '').toLowerCase()
+        const hasPasswordChange = accountNewPassword.trim() || accountConfirmPassword.trim()
+        if (!accountCurrentPassword.trim()) {
+            setAccountError('Current password is required to update your account')
+            return
+        }
+        if (hasPasswordChange && accountNewPassword.trim() !== accountConfirmPassword.trim()) {
+            setAccountError('New password and confirmation do not match')
+            return
+        }
+        if (hasPasswordChange && accountNewPassword.trim().length < 6) {
+            setAccountError('New password must be at least 6 characters')
+            return
+        }
+        setAccountError(null)
+        setAccountSuccess(null)
+        setAccountSaving(true)
+        const body = {
+            current_password: accountCurrentPassword.trim(),
+            ...(hasEmailChange ? { email: newEmail } : {}),
+            ...(accountNewPassword.trim() ? { new_password: accountNewPassword.trim(), confirm_password: accountConfirmPassword.trim() } : {}),
+        }
+        authenticatedFetch('/api/v1/users/me', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (ok && data.user) {
+                    setCurrentUser(data.user)
+                    setAccountSuccess(data.message || 'Account updated.')
+                    if (data.user.email) setAccountEmail(data.user.email)
+                    setAccountCurrentPassword('')
+                    setAccountNewPassword('')
+                    setAccountConfirmPassword('')
+                    setTimeout(() => {
+                        setAccountDialogOpen(false)
+                        setAccountSuccess(null)
+                    }, 1500)
+                } else {
+                    setAccountError(data.error || 'Failed to update account')
+                }
+            })
+            .catch(() => setAccountError('Failed to update account. Please try again.'))
+            .finally(() => setAccountSaving(false))
+    }
+
     return (
         <>
             <Navbar />
@@ -197,9 +283,18 @@ function Leagues() {
                         <Typography variant="h4" component="h1">
                             My Leagues
                         </Typography>
-                        {currentUser?.email && (
+                        {(currentUser?.email || leagues.length > 0) && (
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                                Signed in as {currentUser.email}
+                                Signed in as{' '}
+                                <Link
+                                    component="button"
+                                    variant="body2"
+                                    onClick={handleOpenAccountDialog}
+                                    sx={{ cursor: 'pointer', fontWeight: 500 }}
+                                >
+                                    {currentUser?.email || 'your account'}
+                                </Link>
+                                {' '}(update email or password)
                             </Typography>
                         )}
                     </Box>
@@ -396,6 +491,66 @@ function Leagues() {
                     <DialogActions>
                         <Button onClick={() => setJoinOpenLeagueId(null)}>Cancel</Button>
                         <Button onClick={handleJoinOpenLeagueSubmit} variant="contained" color="primary">Join</Button>
+                    </DialogActions>
+                </Dialog>
+
+                {/* Account (email / password) Dialog */}
+                <Dialog open={accountDialogOpen} onClose={() => !accountSaving && setAccountDialogOpen(false)} maxWidth="xs" fullWidth>
+                    <DialogTitle>Account</DialogTitle>
+                    <DialogContent>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            Logged in as: <strong>{currentUser?.email}</strong>
+                        </Typography>
+                        <TextField
+                            autoFocus
+                            margin="dense"
+                            label="Email address"
+                            type="email"
+                            fullWidth
+                            variant="standard"
+                            value={accountEmail}
+                            onChange={(e) => { setAccountEmail(e.target.value); setAccountError(null); }}
+                            placeholder="your@email.com"
+                            sx={{ mt: 2 }}
+                        />
+                        <TextField
+                            margin="dense"
+                            label="Current password (required to save changes)"
+                            type="password"
+                            fullWidth
+                            variant="standard"
+                            value={accountCurrentPassword}
+                            onChange={(e) => { setAccountCurrentPassword(e.target.value); setAccountError(null); }}
+                            sx={{ mt: 2 }}
+                        />
+                        <TextField
+                            margin="dense"
+                            label="New password (optional)"
+                            type="password"
+                            fullWidth
+                            variant="standard"
+                            value={accountNewPassword}
+                            onChange={(e) => { setAccountNewPassword(e.target.value); setAccountError(null); }}
+                            sx={{ mt: 2 }}
+                        />
+                        <TextField
+                            margin="dense"
+                            label="Confirm new password"
+                            type="password"
+                            fullWidth
+                            variant="standard"
+                            value={accountConfirmPassword}
+                            onChange={(e) => { setAccountConfirmPassword(e.target.value); setAccountError(null); }}
+                            sx={{ mt: 1 }}
+                        />
+                        {accountError && <Alert severity="error" sx={{ mt: 2 }}>{accountError}</Alert>}
+                        {accountSuccess && <Alert severity="success" sx={{ mt: 2 }}>{accountSuccess}</Alert>}
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setAccountDialogOpen(false)} disabled={accountSaving}>Cancel</Button>
+                        <Button onClick={handleAccountSubmit} variant="contained" color="primary" disabled={accountSaving}>
+                            {accountSaving ? 'Saving…' : 'Save changes'}
+                        </Button>
                     </DialogActions>
                 </Dialog>
 

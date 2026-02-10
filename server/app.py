@@ -1656,11 +1656,53 @@ class Games(Resource):
     
 @app.route('/api/v1/authorized')
 def authorized():
-    user = get_active_user_by_id(get_current_user_id())
-    if not user:
+    """Return current user as plain dict (avoids recursion from User.to_dict() relationships)."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return make_response({"error": "Not authenticated"}, 401)
+    user_dict = get_user_dict_by_id(user_id)
+    if not user_dict:
         return make_response({"error": "User not found"}, 404)
-    return make_response(user.to_dict(), 200)
-    
+    return make_response(user_dict, 200)
+
+
+@app.route('/api/v1/users/me', methods=['PATCH'])
+def update_current_user():
+    """Update current user email and/or password. Requires current_password for any change."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return make_response({'error': 'User not authenticated'}, 401)
+    user = get_active_user_by_id(user_id)
+    if not user:
+        return make_response({'error': 'User not found'}, 404)
+    data = request.get_json() or {}
+    current_password = (data.get('current_password') or '').strip()
+    if not current_password:
+        return make_response({'error': 'Current password is required to update account'}, 400)
+    if not _verify_password(user_id, current_password):
+        return make_response({'error': 'Current password is incorrect'}, 403)
+    updated = False
+    new_email = (data.get('email') or '').strip().lower()
+    if new_email and new_email != (user.email or '').lower():
+        if get_active_user_by_email(new_email):
+            return make_response({'error': 'An account with that email already exists'}, 400)
+        user.email = new_email
+        updated = True
+    new_password = (data.get('new_password') or '').strip()
+    if new_password:
+        confirm = (data.get('confirm_password') or '').strip()
+        if new_password != confirm:
+            return make_response({'error': 'New password and confirmation do not match'}, 400)
+        user.password_hash = new_password
+        updated = True
+    if not updated:
+        user_dict = get_user_dict_by_id(user_id)
+        return make_response({'user': user_dict, 'message': 'No changes made'}, 200)
+    db.session.commit()
+    user_dict = get_user_dict_by_id(user_id)
+    return make_response({'user': user_dict, 'message': 'Account updated'}, 200)
+
+
 @app.route('/api/v1/logout', methods=['DELETE'])
 def logout():
     session['user_id'] = None
