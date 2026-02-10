@@ -293,12 +293,19 @@ class Users(Resource):
                     display_name = f"{display_base}_{suffix}"
                 db.session.add(LeagueMembership(user_id=user.id, league_id=league.id, display_name=display_name, role='player'))
             db.session.commit()
-            session['user_id'] = user.id
-            token = generate_token(user.id)
+            user_id = user.id
+            session['user_id'] = user_id
+            token = generate_token(user_id)
+            # Use plain dict (get_user_dict_by_id) to avoid recursion from User.to_dict() serializing leagues/memberships
+            user_dict = get_user_dict_by_id(user_id)
             return make_response({
-                'user': user.to_dict(),
+                'user': user_dict or {'id': user_id, 'email': email, 'username': None, 'created_at': None, 'updated_at': None},
                 'token': token
             }, 201)
+        except RecursionError:
+            db.session.rollback()
+            print("Signup: recursion during user creation or response serialization")
+            return make_response({'error': 'Signup failed. Please try again.'}, 500)
         except Exception as e:
             db.session.rollback()
             print(f"Error creating user: {str(e)}")
