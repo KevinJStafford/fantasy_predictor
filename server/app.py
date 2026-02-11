@@ -2267,9 +2267,32 @@ def admin_create_member_prediction(league_id, member_user_id):
         return make_response({'error': str(e)}, 500)
 
 
+def _fixture_date_on_or_after_league(fixture, game, league_created_at):
+    """True if the fixture/game date is on or after league creation (so it counts for this league's leaderboard)."""
+    if league_created_at is None:
+        return True
+    dt = None
+    if fixture and getattr(fixture, 'fixture_date', None) is not None:
+        dt = fixture.fixture_date
+    elif game and getattr(game, 'game_week', None) is not None:
+        dt = game.game_week
+    if dt is None:
+        return False
+    # Normalize for comparison (naive vs aware)
+    try:
+        if dt.tzinfo is None and league_created_at.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        elif dt.tzinfo and league_created_at.tzinfo is None:
+            league_created_at = league_created_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    return dt >= league_created_at
+
+
 @app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
 def get_league_leaderboard(league_id):
-    """Get leaderboard for a league - players ordered by points"""
+    """Get leaderboard for a league - players ordered by points.
+    Only fixtures on or after league.created_at are counted (scoring starts when the league was created)."""
     try:
         user_id = get_current_user_id()
         if not user_id:
@@ -2278,6 +2301,8 @@ def get_league_leaderboard(league_id):
         league = League.query.get(league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
+        
+        league_created_at = getattr(league, 'created_at', None)
         
         # Check if user is a member (and not soft-deleted)
         user = get_active_user_by_id(user_id)
@@ -2327,11 +2352,13 @@ def get_league_leaderboard(league_id):
                     return True
             return False
 
-        # Completed fixtures = have both scores (missed pick counts as Loss)
+        # Completed fixtures = have both scores (missed pick counts as Loss).
+        # Only consider fixtures on or after league creation for scoring.
         completed_fixtures = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
             Fixture.actual_away_score.isnot(None)
         ).all()
+        completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
 
         # Combine backfill (imported table) with live W/D/L from scored predictions; missed picks = Loss
         leaderboard = []
@@ -2343,10 +2370,12 @@ def get_league_leaderboard(league_id):
             wins = lm.backfill_wins or 0
             draws = lm.backfill_draws or 0
             losses = lm.backfill_losses or 0
-            # Add live results from member's predictions for fixtures that have scores
+            # Add live results from member's predictions for fixtures that have scores (only on or after league creation)
             games = Game.query.filter_by(user_id=member.id).all()
             for g in games:
                 fixture = _fixture_for_game(g)
+                if not _fixture_date_on_or_after_league(fixture, g, league_created_at):
+                    continue
                 result = _result_for_game(g, fixture)
                 if result == 'Win':
                     wins += 1
@@ -2354,11 +2383,11 @@ def get_league_leaderboard(league_id):
                     draws += 1
                 elif result == 'Loss':
                     losses += 1
-            # Missed pick = no prediction for a completed fixture in a round where they have at least one pick → count as Loss
+            # Missed pick = no prediction for a completed fixture in a round where they have at least one pick (on or after league creation) → count as Loss
             rounds_with_pick = set()
             for g in games:
                 fx = _fixture_for_game(g)
-                if fx and fx.fixture_round is not None:
+                if fx and fx.fixture_round is not None and _fixture_date_on_or_after_league(fx, g, league_created_at):
                     rounds_with_pick.add(fx.fixture_round)
             for f in completed_fixtures:
                 if f.fixture_round not in rounds_with_pick:
