@@ -278,20 +278,20 @@ class Users(Resource):
             user.password_hash = pw
             db.session.add(user)
             db.session.flush()
-            # Add new user to all open leagues (display name = email local part, unique per league)
+            # Add new user only to the configured signup league (e.g. Predictor Community / league 11). They can join other open leagues from Browse.
             display_base = email.split('@')[0].strip() or 'Player'
             if not display_base or len(display_base) < 2:
                 display_base = 'Player'
-            open_leagues = League.query.filter_by(is_open=True).all()
-            for league in open_leagues:
-                if LeagueMembership.query.filter_by(league_id=league.id, user_id=user.id).first():
-                    continue
-                display_name = display_base
-                suffix = 0
-                while LeagueMembership.query.filter_by(league_id=league.id, display_name=display_name).first():
-                    suffix += 1
-                    display_name = f"{display_base}_{suffix}"
-                db.session.add(LeagueMembership(user_id=user.id, league_id=league.id, display_name=display_name, role='player'))
+            signup_league_id = app.config.get('SIGNUP_LEAGUE_ID')
+            if signup_league_id is not None:
+                league = League.query.get(signup_league_id)
+                if league and not LeagueMembership.query.filter_by(league_id=league.id, user_id=user.id).first():
+                    display_name = display_base
+                    suffix = 0
+                    while LeagueMembership.query.filter_by(league_id=league.id, display_name=display_name).first():
+                        suffix += 1
+                        display_name = f"{display_base}_{suffix}"
+                    db.session.add(LeagueMembership(user_id=user.id, league_id=league.id, display_name=display_name, role='player'))
             db.session.commit()
             user_id = user.id
             session['user_id'] = user_id
@@ -2003,6 +2003,42 @@ def join_league_by_code():
     except Exception as e:
         db.session.rollback()
         print(f"Error joining league by code: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/me', methods=['PATCH'])
+def update_my_league_display_name(league_id):
+    """Update the current user's display name in this league. Must be unique (case-insensitive) within the league."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        membership = get_league_membership(user_id, league_id)
+        if not membership:
+            return make_response({'error': 'You are not a member of this league'}, 403)
+        data = request.get_json() or {}
+        new_name = (data.get('display_name') or '').strip()
+        if not new_name:
+            return make_response({'error': 'Display name cannot be empty'}, 400)
+        # Uniqueness: no other member in this league has this display name (case-insensitive)
+        for lm in league.league_memberships:
+            if lm.user_id != user_id and (lm.display_name or '').strip().lower() == new_name.lower():
+                return make_response({'error': 'That display name is already taken in this league'}, 400)
+        membership.display_name = new_name
+        db.session.commit()
+        return make_response({
+            'message': 'Display name updated',
+            'display_name': membership.display_name,
+            'league': league.to_dict(),
+        }, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating league display name: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)

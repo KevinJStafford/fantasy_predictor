@@ -45,6 +45,10 @@ function Members() {
     const [plStandings, setPlStandings] = useState(null)
     const [loadingStandings, setLoadingStandings] = useState(false)
     const [standingsError, setStandingsError] = useState(null)
+    const [displayNameDialogOpen, setDisplayNameDialogOpen] = useState(false)
+    const [displayNameDraft, setDisplayNameDraft] = useState('')
+    const [displayNameError, setDisplayNameError] = useState(null)
+    const [displayNameSaving, setDisplayNameSaving] = useState(false)
 
     // Prefer backend is_admin flag; fallback to member role or league creator
     const isAdmin = leagueDetail?.is_admin === true ||
@@ -326,6 +330,41 @@ function Members() {
             })
             .catch(() => setLeagueDetail(null))
         fetchLeaderboard()
+    }
+
+    const myMembership = leagueMembers.find(m => Number(m.id) === Number(currentUser?.id))
+
+    function handleOpenDisplayNameDialog() {
+        setDisplayNameDraft(myMembership?.display_name ?? '')
+        setDisplayNameError(null)
+        setDisplayNameDialogOpen(true)
+    }
+
+    function handleSaveDisplayName() {
+        const name = (displayNameDraft || '').trim()
+        if (!name) {
+            setDisplayNameError('Display name cannot be empty')
+            return
+        }
+        if (!leagueId) return
+        setDisplayNameError(null)
+        setDisplayNameSaving(true)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/me`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ display_name: name }),
+        })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (ok) {
+                    setDisplayNameDialogOpen(false)
+                    refreshLeagueDetail()
+                } else {
+                    setDisplayNameError(data.error || 'Failed to update display name')
+                }
+            })
+            .catch(() => setDisplayNameError('Failed to update display name. Please try again.'))
+            .finally(() => setDisplayNameSaving(false))
     }
 
     function handleDeleteLeague() {
@@ -750,6 +789,25 @@ function Members() {
                     </CardContent>
                 </Card>
                 <Box sx={{ position: 'sticky', top: 20 }}>
+                    {/* Your display name in this league */}
+                    {leagueId && myMembership && (
+                        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                            <Typography variant="body2" color="text.secondary">
+                                Your display name in this league:
+                            </Typography>
+                            <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>
+                                {myMembership.display_name}
+                            </Typography>
+                            <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<EditIcon />}
+                                onClick={handleOpenDisplayNameDialog}
+                            >
+                                Update name
+                            </Button>
+                        </Box>
+                    )}
                     {/* Leaderboard Table */}
                     <Box sx={{ mb: 3 }}>
                         <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
@@ -1049,6 +1107,33 @@ function Members() {
             <DialogActions>
                 <Button onClick={() => setDeleteLeagueDialog(false)}>Cancel</Button>
                 <Button color="error" variant="contained" onClick={handleDeleteLeague}>Delete league</Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Update your display name in this league */}
+        <Dialog open={displayNameDialogOpen} onClose={() => !displayNameSaving && setDisplayNameDialogOpen(false)} maxWidth="xs" fullWidth>
+            <DialogTitle>Update display name</DialogTitle>
+            <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    This name is shown on the leaderboard and to other members. It must be unique in this league.
+                </Typography>
+                <TextField
+                    autoFocus
+                    margin="dense"
+                    label="Display name"
+                    fullWidth
+                    variant="standard"
+                    value={displayNameDraft}
+                    onChange={(e) => { setDisplayNameDraft(e.target.value); setDisplayNameError(null); }}
+                    placeholder="Your name in this league"
+                />
+                {displayNameError && <Alert severity="error" sx={{ mt: 2 }}>{displayNameError}</Alert>}
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setDisplayNameDialogOpen(false)} disabled={displayNameSaving}>Cancel</Button>
+                <Button onClick={handleSaveDisplayName} variant="contained" color="primary" disabled={displayNameSaving}>
+                    {displayNameSaving ? 'Saving…' : 'Save'}
+                </Button>
             </DialogActions>
         </Dialog>
 
