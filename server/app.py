@@ -92,7 +92,7 @@ def generate_token(user_id):
     """Generate a JWT token for a user"""
     payload = {
         'user_id': user_id,
-        'exp': datetime.now(timezone.utc) + timedelta(days=7)  # Token expires in 7 days
+        'exp': datetime.now(timezone.utc) + timedelta(days=30)  # Token expires in 30 days
     }
     return jwt.encode(payload, app.secret_key, algorithm='HS256')
 
@@ -2455,8 +2455,12 @@ def get_league_leaderboard(league_id):
                     if pts == max_pts:
                         db.session.add(LeagueWeekWinner(league_id=league_id, fixture_round=round_num, user_id=uid))
             db.session.commit()
-            # Current round = latest round we have fixtures for
-            current_round = max(all_fixtures_by_round.keys(), default=None)
+            # Current round = highest round that is not fully completed (in-progress week); if all complete, use last round
+            incomplete_rounds = [r for r in all_fixtures_by_round.keys() if r not in completed_rounds]
+            if incomplete_rounds:
+                current_round = max(incomplete_rounds)
+            else:
+                current_round = max(all_fixtures_by_round.keys(), default=None)
             weeks_won_map = {}
             for w in LeagueWeekWinner.query.filter_by(league_id=league_id).all():
                 weeks_won_map[w.user_id] = weeks_won_map.get(w.user_id, 0) + 1
