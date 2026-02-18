@@ -127,6 +127,18 @@ class Fixture(db.Model, SerializerMixin):
     def __repr__(self):
         return f'<Fixture {self.id}: {self.fixture_home_team} vs {self.fixture_away_team}>'
 
+class LeagueWeekWinner(db.Model, SerializerMixin):
+    """Records which member(s) won a given round in a league (for weekly leaderboard). Ties = multiple rows."""
+    __tablename__ = 'league_week_winners'
+
+    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), primary_key=True)
+    fixture_round = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+
+    league = db.relationship('League', backref=db.backref('week_winners', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('league_week_wins', lazy='dynamic'))
+
+
 class League(db.Model, SerializerMixin):
     __tablename__ = 'leagues'
 
@@ -136,6 +148,7 @@ class League(db.Model, SerializerMixin):
     name = db.Column(db.String, nullable=False)
     invite_code = db.Column(db.String, unique=True, nullable=False)
     is_open = db.Column(db.Boolean, nullable=False, default=False)  # True = anyone can find and join; False = invite only
+    leaderboard_scope = db.Column(db.String, nullable=False, default='full_season')  # 'full_season' | 'weekly'
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -151,6 +164,7 @@ class League(db.Model, SerializerMixin):
             'name': self.name,
             'invite_code': self.invite_code,
             'is_open': getattr(self, 'is_open', False),
+            'leaderboard_scope': getattr(self, 'leaderboard_scope', 'full_season'),
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

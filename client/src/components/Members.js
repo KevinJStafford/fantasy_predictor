@@ -16,6 +16,8 @@ function Members() {
     const history = useHistory()
     const [leagueId, setLeagueId] = useState(null)
     const [leaderboard, setLeaderboard] = useState([])
+    const [leaderboardScope, setLeaderboardScope] = useState('full_season')
+    const [leaderboardCurrentRound, setLeaderboardCurrentRound] = useState(null)
     const [loadingLeaderboard, setLoadingLeaderboard] = useState(false)
     const [filteredFixtures, setFilteredFixtures] = useState([])
     const [availableRounds, setAvailableRounds] = useState([])
@@ -310,10 +312,14 @@ function Members() {
             })
             .then(data => {
                 setLeaderboard(data.leaderboard || [])
+                setLeaderboardScope(data.scope || 'full_season')
+                setLeaderboardCurrentRound(data.current_round ?? null)
             })
             .catch(error => {
                 console.error('Error fetching leaderboard:', error)
                 setLeaderboard([])
+                setLeaderboardScope('full_season')
+                setLeaderboardCurrentRound(null)
             })
             .finally(() => {
                 setLoadingLeaderboard(false)
@@ -812,9 +818,16 @@ function Members() {
                     <Box sx={{ mb: 3 }}>
                         <Typography variant="h5" component="h2" sx={{ mb: 2 }}>
                             League Leaderboard
+                            {leaderboardScope === 'weekly' && leaderboardCurrentRound != null && (
+                                <Typography component="span" variant="body1" color="text.secondary" sx={{ ml: 1, fontWeight: 'normal' }}>
+                                    (Week {leaderboardCurrentRound})
+                                </Typography>
+                            )}
                         </Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                            All game weeks (1-38)
+                            {leaderboardScope === 'weekly'
+                                ? 'Points this week. "Weeks won" = number of weeks you placed first (including ties).'
+                                : 'All game weeks (1-38)'}
                         </Typography>
                         {loadingLeaderboard ? (
                             <Typography variant="body2">Loading leaderboard...</Typography>
@@ -829,6 +842,9 @@ function Members() {
                                             <TableCell align="right"><strong>W</strong></TableCell>
                                             <TableCell align="right"><strong>D</strong></TableCell>
                                             <TableCell align="right"><strong>L</strong></TableCell>
+                                            {leaderboardScope === 'weekly' && (
+                                                <TableCell align="right"><strong>Weeks won</strong></TableCell>
+                                            )}
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -846,6 +862,9 @@ function Members() {
                                                 <TableCell align="right">{player.wins}</TableCell>
                                                 <TableCell align="right">{player.draws}</TableCell>
                                                 <TableCell align="right">{player.losses}</TableCell>
+                                                {leaderboardScope === 'weekly' && (
+                                                    <TableCell align="right">{player.weeks_won ?? 0}</TableCell>
+                                                )}
                                             </TableRow>
                                         ))}
                                     </TableBody>

@@ -18,6 +18,7 @@ function Leagues() {
     const [createName, setCreateName] = useState('')
     const [createDisplayName, setCreateDisplayName] = useState('')
     const [createIsOpen, setCreateIsOpen] = useState(false)
+    const [createLeaderboardScope, setCreateLeaderboardScope] = useState('full_season')
     const [createError, setCreateError] = useState(null)
     const [openLeaguesSearch, setOpenLeaguesSearch] = useState('')
     const [openLeagues, setOpenLeagues] = useState([])
@@ -152,10 +153,11 @@ function Leagues() {
         authenticatedFetch('/api/v1/leagues', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+                body: JSON.stringify({
                 name: createName.trim(),
                 display_name: createDisplayName.trim(),
                 is_open: createIsOpen,
+                leaderboard_scope: createLeaderboardScope,
             })
         })
             .then(res => res.json())
@@ -165,6 +167,7 @@ function Leagues() {
                     setCreateName('')
                     setCreateDisplayName('')
                     setCreateIsOpen(false)
+                    setCreateLeaderboardScope('full_season')
                     fetchLeagues()
                     fetchOpenLeagues()
                 } else {
@@ -462,6 +465,11 @@ function Leagues() {
                         <RadioGroup row value={createIsOpen ? 'open' : 'invite'} onChange={(e) => setCreateIsOpen(e.target.value === 'open')}>
                             <FormControlLabel value="open" control={<Radio />} label="Open to anyone (listed in Browse open leagues)" />
                             <FormControlLabel value="invite" control={<Radio />} label="Invite only (share code to join)" />
+                        </RadioGroup>
+                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Leaderboard</Typography>
+                        <RadioGroup row value={createLeaderboardScope} onChange={(e) => setCreateLeaderboardScope(e.target.value)}>
+                            <FormControlLabel value="full_season" control={<Radio />} label="Full season (total points)" />
+                            <FormControlLabel value="weekly" control={<Radio />} label="Weekly (week-by-week; track how many weeks each player wins)" />
                         </RadioGroup>
                         {createError && <Alert severity="error" sx={{ mt: 2 }}>{createError}</Alert>}
                     </DialogContent>

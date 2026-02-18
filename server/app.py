@@ -18,7 +18,7 @@ from flask_restful import Resource
 # Local imports
 from config import app, db, api, bcrypt
 # Add your model imports
-from models import User, Game, Prediction, Fixture, League, LeagueMembership
+from models import User, Game, Prediction, Fixture, League, LeagueMembership, LeagueWeekWinner
 from sqlalchemy import func, or_, select
 
 
@@ -1908,6 +1908,9 @@ def create_league():
         league_name = (data.get('name') or '').strip()
         display_name = (data.get('display_name') or '').strip()
         is_open = data.get('is_open') in (True, 'true', 1, '1')
+        scope = (data.get('leaderboard_scope') or data.get('scope') or 'full_season').strip().lower()
+        if scope not in ('full_season', 'weekly'):
+            scope = 'full_season'
         if not league_name:
             return make_response({'error': 'League name is required'}, 400)
         if not display_name:
@@ -1921,7 +1924,7 @@ def create_league():
             if not existing:
                 break
         
-        league = League(name=league_name, invite_code=invite_code, is_open=is_open, created_by=user_id)
+        league = League(name=league_name, invite_code=invite_code, is_open=is_open, leaderboard_scope=scope, created_by=user_id)
         db.session.add(league)
         db.session.flush()
         
@@ -2396,7 +2399,124 @@ def get_league_leaderboard(league_id):
         ).all()
         completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
 
-        # Combine backfill (imported table) with live W/D/L from scored predictions; missed picks = Loss
+        scope = getattr(league, 'leaderboard_scope', 'full_season')
+        if scope == 'weekly':
+            # --- Weekly leaderboard: backfill week winners, then return current week standings + weeks_won ---
+            all_fixtures_by_round = {}
+            for f in Fixture.query.all():
+                if f.fixture_round is not None and _fixture_date_on_or_after_league(f, None, league_created_at):
+                    all_fixtures_by_round.setdefault(f.fixture_round, []).append(f)
+            completed_rounds = []
+            for r, flist in all_fixtures_by_round.items():
+                if all(f.actual_home_score is not None and f.actual_away_score is not None for f in flist):
+                    completed_rounds.append(r)
+            # Backfill: award week winner(s) for any completed round we haven't recorded yet
+            for round_num in completed_rounds:
+                existing = LeagueWeekWinner.query.filter_by(league_id=league_id, fixture_round=round_num).first()
+                if existing:
+                    continue
+                round_fixtures = [f for f in completed_fixtures if f.fixture_round == round_num]
+                if not round_fixtures:
+                    continue
+                # Points per member for this round only
+                round_points = {}
+                for lm in league.league_memberships:
+                    if lm.user.deleted_at:
+                        continue
+                    wins, draws, losses = 0, 0, 0
+                    games = Game.query.filter_by(user_id=lm.user.id).all()
+                    for g in games:
+                        fixture = _fixture_for_game(g)
+                        if not fixture or fixture.fixture_round != round_num or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
+                            continue
+                        res = _result_for_game(g, fixture)
+                        if res == 'Win':
+                            wins += 1
+                        elif res == 'Draw':
+                            draws += 1
+                        elif res == 'Loss':
+                            losses += 1
+                    rounds_with_pick = set()
+                    for g in games:
+                        fx = _fixture_for_game(g)
+                        if fx and fx.fixture_round == round_num and _fixture_date_on_or_after_league(fx, g, league_created_at):
+                            rounds_with_pick.add(fx.fixture_round)
+                    for f in round_fixtures:
+                        if f.fixture_round not in rounds_with_pick:
+                            continue
+                        if not _member_has_game_for_fixture(lm.user.id, f):
+                            losses += 1
+                    pts = (wins * 3) + (draws * 1)
+                    round_points[lm.user_id] = (pts, wins, draws, losses)
+                if not round_points:
+                    continue
+                max_pts = max(p[0] for p in round_points.values())
+                for uid, (pts, _, _, _) in round_points.items():
+                    if pts == max_pts:
+                        db.session.add(LeagueWeekWinner(league_id=league_id, fixture_round=round_num, user_id=uid))
+            db.session.commit()
+            # Current round = latest round we have fixtures for
+            current_round = max(all_fixtures_by_round.keys(), default=None)
+            weeks_won_map = {}
+            for w in LeagueWeekWinner.query.filter_by(league_id=league_id).all():
+                weeks_won_map[w.user_id] = weeks_won_map.get(w.user_id, 0) + 1
+            if current_round is None:
+                leaderboard = []
+                for lm in league.league_memberships:
+                    if lm.user.deleted_at:
+                        continue
+                    leaderboard.append({
+                        'user_id': lm.user.id,
+                        'display_name': lm.display_name,
+                        'wins': 0, 'draws': 0, 'losses': 0, 'points': 0, 'total_games': 0,
+                        'weeks_won': weeks_won_map.get(lm.user.id, 0),
+                    })
+            else:
+                round_fixtures = [f for f in completed_fixtures if f.fixture_round == current_round]
+                leaderboard = []
+                for lm in league.league_memberships:
+                    if lm.user.deleted_at:
+                        continue
+                    wins, draws, losses = 0, 0, 0
+                    games = Game.query.filter_by(user_id=lm.user.id).all()
+                    for g in games:
+                        fixture = _fixture_for_game(g)
+                        if not fixture or fixture.fixture_round != current_round or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
+                            continue
+                        res = _result_for_game(g, fixture)
+                        if res == 'Win':
+                            wins += 1
+                        elif res == 'Draw':
+                            draws += 1
+                        elif res == 'Loss':
+                            losses += 1
+                    rounds_with_pick = set()
+                    for g in games:
+                        fx = _fixture_for_game(g)
+                        if fx and fx.fixture_round == current_round and _fixture_date_on_or_after_league(fx, g, league_created_at):
+                            rounds_with_pick.add(fx.fixture_round)
+                    for f in round_fixtures:
+                        if f.fixture_round not in rounds_with_pick:
+                            continue
+                        if not _member_has_game_for_fixture(lm.user.id, f):
+                            losses += 1
+                    points = (wins * 3) + (draws * 1)
+                    total_games = wins + draws + losses
+                    leaderboard.append({
+                        'user_id': lm.user.id,
+                        'display_name': lm.display_name,
+                        'wins': wins, 'draws': draws, 'losses': losses,
+                        'points': points, 'total_games': total_games,
+                        'weeks_won': weeks_won_map.get(lm.user.id, 0),
+                    })
+                leaderboard.sort(key=lambda x: (x['points'], -x['losses'], x['wins'], x['draws']), reverse=True)
+            return make_response({
+                'leaderboard': leaderboard,
+                'scope': 'weekly',
+                'current_round': current_round,
+            }, 200)
+
+        # Full season: combine backfill (imported table) with live W/D/L from scored predictions; missed picks = Loss
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
@@ -2445,7 +2565,7 @@ def get_league_leaderboard(league_id):
         # Sort by points (descending), then by fewest losses first, then wins, then draws
         leaderboard.sort(key=lambda x: (x['points'], -x['losses'], x['wins'], x['draws']), reverse=True)
         
-        return make_response({'leaderboard': leaderboard}, 200)
+        return make_response({'leaderboard': leaderboard, 'scope': 'full_season'}, 200)
     except Exception as e:
         print(f"Error fetching leaderboard: {str(e)}")
         import traceback
