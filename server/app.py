@@ -2455,10 +2455,10 @@ def get_league_leaderboard(league_id):
                     if pts == max_pts:
                         db.session.add(LeagueWeekWinner(league_id=league_id, fixture_round=round_num, user_id=uid))
             db.session.commit()
-            # Current round = highest round that is not fully completed (in-progress week); if all complete, use last round
+            # Current round = lowest round that is not fully completed (the in-progress week); if all complete, use last round
             incomplete_rounds = [r for r in all_fixtures_by_round.keys() if r not in completed_rounds]
             if incomplete_rounds:
-                current_round = max(incomplete_rounds)
+                current_round = min(incomplete_rounds)
             else:
                 current_round = max(all_fixtures_by_round.keys(), default=None)
             weeks_won_map = {}
