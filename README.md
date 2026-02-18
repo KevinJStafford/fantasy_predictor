@@ -133,6 +133,35 @@ http://localhost:3000
 
 ---
 
+## ☀️ Keep-warm for Render
+
+If your API is on Render’s free (or spin-down) tier, the first request after idle can be slow while the service starts. To keep it awake:
+
+1. **Endpoint:** The API exposes `GET /api/v1/health` (no auth). It returns `{"status":"ok"}`.
+2. **Cron:** Use a free external cron to hit that URL every 10–14 minutes.
+
+**Option A – cron-job.org (free):**
+
+1. Go to [cron-job.org](https://cron-job.org) and create an account.
+2. Create a new cron job:
+   - **URL:** `https://YOUR-RENDER-API-URL.onrender.com/api/v1/health`
+   - **Schedule:** Every 10 minutes (or “every 14 minutes”).
+   - **Request method:** GET.
+3. Save. The job will ping your API on schedule so it doesn’t spin down.
+
+**Option B – UptimeRobot (free):**
+
+1. Go to [uptimerobot.com](https://uptimerobot.com) and create an account.
+2. Add a monitor:
+   - **Monitor type:** HTTP(s).
+   - **URL:** `https://YOUR-RENDER-API-URL.onrender.com/api/v1/health`
+   - **Monitoring interval:** 5 minutes (free tier).
+3. Save. UptimeRobot will request the URL on the interval and your API stays warm.
+
+Replace `YOUR-RENDER-API-URL` with your actual Render API hostname (e.g. `fantasy-predictor-api`).
+
+---
+
 ## 🗂️ Project Structure
 
 ```

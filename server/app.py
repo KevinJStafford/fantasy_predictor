@@ -87,6 +87,12 @@ def add_cors_headers_if_missing(response):
     return response
 
 
+@app.route('/api/v1/health', methods=['GET'])
+def health():
+    """Lightweight endpoint for keep-warm cron and load balancers. No auth required."""
+    return make_response({'status': 'ok'}, 200)
+
+
 # JWT token helper functions
 def generate_token(user_id):
     """Generate a JWT token for a user"""
