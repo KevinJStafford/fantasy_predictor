@@ -519,18 +519,18 @@ def get_next_incomplete_round():
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the lowest round that has NOT fully completed yet.
-    Uses DB logic: a round is incomplete if it has any fixture with (no scores) AND (is_completed is not true)."""
+    A round is incomplete if it has any fixture with is_completed = False or NULL."""
     try:
         from sqlalchemy import distinct
-        # Rounds that have at least one incomplete fixture: (missing scores) and (not completed)
+        # Rounds that have at least one fixture not marked completed (ignore scores)
         incomplete_query = (
             db.session.query(distinct(Fixture.fixture_round))
             .filter(Fixture.fixture_round.isnot(None))
-            .filter(or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None)))
             .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
         )
         incomplete_rows = incomplete_query.all()
         incomplete_rounds = sorted([int(r[0]) for r in incomplete_rows if r[0] is not None])
+        max_r = None
         if incomplete_rounds:
             round_num = incomplete_rounds[0]
         else:
@@ -538,7 +538,17 @@ def get_current_round():
             max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
             max_r = int(max_row[0]) if max_row and max_row[0] is not None else None
             round_num = (max_r + 1) if max_r is not None else None
-        resp = make_response({'round': round_num}, 200)
+        payload = {'round': round_num}
+        if request.args.get('debug'):
+            max_for_debug = max_r
+            if max_for_debug is None and incomplete_rounds:
+                max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
+                max_for_debug = int(max_row[0]) if max_row and max_row[0] is not None else None
+            payload['_debug'] = {
+                'incomplete_rounds': incomplete_rounds[:15],
+                'max_round': max_for_debug,
+            }
+        resp = make_response(payload, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
     except Exception as e:
