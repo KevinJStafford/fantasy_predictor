@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 
 # Remote library imports
-from flask import request, make_response, session
+from flask import request, make_response, session, send_from_directory
 from flask_restful import Resource
 
 # Local imports
@@ -218,7 +218,7 @@ def get_active_user_id_by_username(username):
 
 
 def get_user_dict_by_id(user_id):
-    """Return a plain dict of user fields for API (id, username, email, created_at, updated_at).
+    """Return a plain dict of user fields for API (id, username, email, avatar_url, created_at, updated_at).
     Uses a single column select per field so no User ORM instance is created (avoids recursion)."""
     if not user_id:
         return None
@@ -226,6 +226,7 @@ def get_user_dict_by_id(user_id):
         User.id,
         User.username,
         User.email,
+        User.avatar_url,
         User.created_at,
         User.updated_at,
     ).where(User.id == user_id, User.deleted_at.is_(None))
@@ -236,8 +237,9 @@ def get_user_dict_by_id(user_id):
         'id': row[0],
         'username': row[1],
         'email': row[2],
-        'created_at': row[3].isoformat() if row[3] else None,
-        'updated_at': row[4].isoformat() if row[4] else None,
+        'avatar_url': row[3],
+        'created_at': row[4].isoformat() if row[4] else None,
+        'updated_at': row[5].isoformat() if row[5] else None,
     }
 
 
@@ -1770,6 +1772,62 @@ def update_current_user():
     db.session.commit()
     user_dict = get_user_dict_by_id(user_id)
     return make_response({'user': user_dict, 'message': 'Account updated'}, 200)
+
+
+# Profile picture uploads: stored under server/uploads/avatars, served at /uploads/avatars/<filename>
+UPLOAD_AVATAR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'avatars')
+AVATAR_MAX_BYTES = 3 * 1024 * 1024  # 3MB
+ALLOWED_AVATAR_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp'}
+
+
+@app.route('/uploads/avatars/<path:filename>')
+def serve_avatar(filename):
+    """Serve uploaded avatar images (no auth required for GET)."""
+    uploads_parent = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+    return send_from_directory(uploads_parent, os.path.join('avatars', filename))
+
+
+@app.route('/api/v1/users/me/avatar', methods=['POST'])
+def upload_avatar():
+    """Upload a profile picture. Expects multipart/form-data with field 'avatar' (image file)."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return make_response({'error': 'Not authenticated'}, 401)
+    user = get_active_user_by_id(user_id)
+    if not user:
+        return make_response({'error': 'User not found'}, 404)
+    file = request.files.get('avatar')
+    if not file or file.filename == '':
+        return make_response({'error': 'No file provided. Use form field "avatar".'}, 400)
+    ext = (file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else '') or ''
+    if ext not in ALLOWED_AVATAR_EXTENSIONS:
+        return make_response({'error': 'Invalid file type. Use JPEG, PNG, or WebP.'}, 400)
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size > AVATAR_MAX_BYTES:
+        return make_response({'error': 'File too large. Maximum size is 3MB.'}, 400)
+    os.makedirs(UPLOAD_AVATAR_DIR, exist_ok=True)
+    safe_name = f"{user_id}_{secrets.token_hex(4)}.{ext}"
+    filepath = os.path.join(UPLOAD_AVATAR_DIR, safe_name)
+    try:
+        file.save(filepath)
+    except OSError as e:
+        print(f"Avatar save error: {e}")
+        return make_response({'error': 'Failed to save file.'}, 500)
+    old_url = user.avatar_url
+    user.avatar_url = f"/uploads/avatars/{safe_name}"
+    db.session.commit()
+    if old_url and old_url.startswith('/uploads/avatars/'):
+        old_name = old_url.replace('/uploads/avatars/', '', 1)
+        old_path = os.path.join(UPLOAD_AVATAR_DIR, old_name)
+        if os.path.isfile(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+    user_dict = get_user_dict_by_id(user_id)
+    return make_response({'user': user_dict, 'message': 'Profile picture updated.'}, 200)
 
 
 @app.route('/api/v1/logout', methods=['DELETE'])

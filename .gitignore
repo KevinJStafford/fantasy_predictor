@@ -97,3 +97,6 @@ server/__pycache__
 
 # Gunicorn
 *.pid
+
+# Uploaded avatars (stored on server filesystem)
+server/uploads/

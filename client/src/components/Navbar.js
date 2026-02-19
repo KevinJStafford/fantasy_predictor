@@ -1,17 +1,41 @@
 import * as React from 'react';
+import { useEffect } from 'react';
 import Avatar from '@mui/material/Avatar';
 import { Box, AppBar, Toolbar, IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useHistory } from 'react-router-dom';
 import { getToken, removeToken } from '../utils/auth';
+import { authenticatedFetch, apiUrl } from '../utils/api';
 
 function Navbar() {
     const history = useHistory();
     const [anchorEl, setAnchorEl] = React.useState(null);
+    const [user, setUser] = React.useState(null);
     const open = Boolean(anchorEl);
     const logoUrl = (process.env.PUBLIC_URL || '') + '/typeface_logo_new.png';
     const isLoggedIn = !!getToken();
+
+    const fetchUser = React.useCallback(() => {
+        if (!getToken()) {
+            setUser(null);
+            return;
+        }
+        authenticatedFetch('/api/v1/authorized')
+            .then((r) => (r.ok ? r.json() : null))
+            .then(setUser)
+            .catch(() => setUser(null));
+    }, []);
+
+    useEffect(() => {
+        fetchUser();
+    }, [fetchUser]);
+
+    useEffect(() => {
+        const onUserUpdated = () => fetchUser();
+        window.addEventListener('user-updated', onUserUpdated);
+        return () => window.removeEventListener('user-updated', onUserUpdated);
+    }, [fetchUser]);
 
     const handleAvatarClick = (event) => {
         if (isLoggedIn) {
@@ -63,8 +87,12 @@ function Navbar() {
                         aria-expanded={open ? 'true' : undefined}
                         sx={{ p: 0 }}
                     >
-                        <Avatar sx={{ bgcolor: 'primary.main' }} variant="rounded">
-                            <AccountBoxIcon />
+                        <Avatar
+                            src={user?.avatar_url ? apiUrl(user.avatar_url) : undefined}
+                            sx={{ bgcolor: user?.avatar_url ? 'transparent' : 'primary.main' }}
+                            variant="rounded"
+                        >
+                            {!user?.avatar_url && <AccountBoxIcon />}
                         </Avatar>
                     </IconButton>
                     <Menu

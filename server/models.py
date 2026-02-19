@@ -38,6 +38,7 @@ class User(db.Model, SerializerMixin):
     reset_token = db.Column(db.String, nullable=True)
     reset_token_expires = db.Column(db.DateTime, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)  # soft delete: when set, user is treated as deleted
+    avatar_url = db.Column(db.String, nullable=True)  # profile picture path, e.g. /uploads/avatars/123_abc.jpg
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
