@@ -519,36 +519,29 @@ def get_next_incomplete_round():
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the lowest round that has NOT fully completed yet.
-    A fixture counts as complete if is_completed is True OR it has both actual scores (so
-    one bad is_completed=False with scores doesn't keep the round 'current')."""
+    A round is complete only when EVERY fixture in that round has both actual scores OR is_completed
+    (same logic as weekly leaderboard)."""
     try:
-        # Incomplete = no final score yet: (is_completed not True) AND (missing actual_home or actual_away)
-        incomplete_condition = db.session.query(Fixture.fixture_round).filter(
-            Fixture.fixture_round.isnot(None)
-        ).filter(
-            or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
-        ).filter(
-            or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None))
-        )
-        next_round_row = incomplete_condition.order_by(Fixture.fixture_round.asc()).first()
-        if next_round_row and next_round_row[0] is not None:
-            round_num = int(next_round_row[0]) if not isinstance(next_round_row[0], int) else next_round_row[0]
-            resp = make_response({'round': round_num}, 200)
-            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
-            return resp
-        # All fixtures complete (or no fixtures): return latest round so end-of-season shows last week
-        all_rounds = (
-            db.session.query(Fixture.fixture_round)
-            .filter(Fixture.fixture_round.isnot(None))
-            .distinct()
-            .all()
-        )
-        round_num = None
-        if all_rounds:
-            try:
-                round_num = max(int(r[0]) for r in all_rounds)
-            except (TypeError, ValueError):
-                round_num = max(r[0] for r in all_rounds if r[0] is not None)
+        all_fixtures = Fixture.query.filter(Fixture.fixture_round.isnot(None)).all()
+        by_round = {}
+        for f in all_fixtures:
+            r = f.fixture_round
+            if r is not None:
+                by_round.setdefault(r, []).append(f)
+        # Round is complete if every fixture has (both scores) or is_completed
+        completed_rounds = set()
+        for r, flist in by_round.items():
+            if all(
+                (getattr(f, 'actual_home_score', None) is not None and getattr(f, 'actual_away_score', None) is not None)
+                or getattr(f, 'is_completed', False)
+                for f in flist
+            ):
+                completed_rounds.add(r)
+        incomplete_rounds = [r for r in by_round.keys() if r not in completed_rounds]
+        if incomplete_rounds:
+            round_num = min(incomplete_rounds)
+        else:
+            round_num = max(by_round.keys(), default=None)
         resp = make_response({'round': round_num}, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
