@@ -534,9 +534,10 @@ def get_current_round():
         if incomplete_rounds:
             round_num = incomplete_rounds[0]
         else:
-            # All rounds complete: return latest round
+            # All rounds complete: default to next week (e.g. 27 when 26 is done)
             max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
-            round_num = int(max_row[0]) if max_row and max_row[0] is not None else None
+            max_r = int(max_row[0]) if max_row and max_row[0] is not None else None
+            round_num = (max_r + 1) if max_r is not None else None
         resp = make_response({'round': round_num}, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
