@@ -1,14 +1,31 @@
+import { useEffect } from 'react';
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
 import { useHistory, Link } from 'react-router-dom';
-import { apiUrl } from '../utils/api';
-import { saveToken } from '../utils/auth';
+import { apiUrl, authenticatedFetch } from '../utils/api';
+import { saveToken, getToken, removeToken } from '../utils/auth';
 
 import Navbar from './Navbar'
 
 function Login({setUser}) {
     const history = useHistory();
+
+    // If user already has a valid token, log them in and redirect to leagues
+    useEffect(() => {
+        if (!getToken()) return;
+        authenticatedFetch('/api/v1/authorized')
+            .then((resp) => {
+                if (resp.ok) {
+                    return resp.json().then((user) => {
+                        setUser(user);
+                        history.push('/leagues');
+                    });
+                }
+                removeToken();
+            })
+            .catch(() => { removeToken(); });
+    }, [history, setUser]);
     const loginSchema = yup.object().shape({
         email: yup.string().email('Invalid email').required('Email is required'),
         password: yup.string().required('Password is required'),
