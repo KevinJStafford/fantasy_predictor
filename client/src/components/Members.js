@@ -516,6 +516,11 @@ function Members() {
         loadCurrentRoundAndFixtures()
     }, [])
 
+    // When league is selected, refresh default game week (in case current-round changed)
+    useEffect(() => {
+        if (leagueId) loadCurrentRoundAndFixtures()
+    }, [leagueId])
+
     const handleDropdownChange = (e) => {
         const selectedValue = e.target.value;
         setGameWeek(selectedValue);

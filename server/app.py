@@ -517,7 +517,7 @@ def get_next_incomplete_round():
 
 
 def _fixture_round_complete(f):
-    """True if this fixture counts as complete for round-completion (has both scores or is_completed truthy)."""
+    """True if this fixture counts as complete for round-completion (has both scores or is_completed set)."""
     has_scores = (
         getattr(f, 'actual_home_score', None) is not None
         and getattr(f, 'actual_away_score', None) is not None
@@ -525,18 +525,18 @@ def _fixture_round_complete(f):
     if has_scores:
         return True
     ic = getattr(f, 'is_completed', None)
-    if ic is True or ic == 1:
-        return True
-    if ic is not None and str(ic).strip().lower() in ('true', '1', 'yes'):
-        return True
-    return False
+    # Treat as incomplete only when explicitly False/0/None/empty/false string
+    if ic is None or ic is False or ic == 0:
+        return False
+    if isinstance(ic, str) and ic.strip().lower() in ('', 'false', '0', 'no', 'n'):
+        return False
+    return True
 
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the lowest round that has NOT fully completed yet.
-    A round is complete only when EVERY fixture in that round has both actual scores OR is_completed
-    (same logic as weekly leaderboard)."""
+    A round is complete only when EVERY fixture in that round has both actual scores OR is_completed set."""
     try:
         all_fixtures = Fixture.query.filter(Fixture.fixture_round.isnot(None)).all()
         by_round = {}
@@ -548,22 +548,36 @@ def get_current_round():
                 except (TypeError, ValueError):
                     pass
                 by_round.setdefault(r, []).append(f)
-        # Round is complete if every fixture has (both scores) or is_completed (truthy)
         completed_rounds = set()
         for r, flist in by_round.items():
             if all(_fixture_round_complete(f) for f in flist):
                 completed_rounds.add(r)
-        incomplete_rounds = sorted([r for r in by_round.keys() if r not in completed_rounds])
+        all_rounds_sorted = sorted(by_round.keys())
+        incomplete_rounds = [r for r in all_rounds_sorted if r not in completed_rounds]
         if incomplete_rounds:
             round_num = incomplete_rounds[0]
         else:
-            round_num = max(by_round.keys(), default=None)
+            round_num = max(by_round.keys(), default=None) if by_round else None
         if round_num is not None:
             try:
                 round_num = int(round_num)
             except (TypeError, ValueError):
                 pass
-        resp = make_response({'round': round_num}, 200)
+        # Optional debug: ?debug=1 returns why (for support)
+        if request.args.get('debug'):
+            debug = {
+                'round': round_num,
+                'round_26_count': len(by_round.get(26, [])),
+                'round_26_complete': 26 in completed_rounds,
+                'round_26_incomplete_reasons': [
+                    {'id': f.id, 'is_completed': getattr(f, 'is_completed', None), 'has_scores': getattr(f, 'actual_home_score', None) is not None and getattr(f, 'actual_away_score', None) is not None}
+                    for f in by_round.get(26, []) if not _fixture_round_complete(f)
+                ],
+                'incomplete_rounds': incomplete_rounds[:10],
+            }
+            resp = make_response({'round': round_num, 'debug': debug}, 200)
+        else:
+            resp = make_response({'round': round_num}, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
     except Exception as e:
