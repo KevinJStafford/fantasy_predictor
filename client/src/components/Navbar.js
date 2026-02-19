@@ -71,20 +71,35 @@ function Navbar() {
 
     return (
         <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1 }}>
-            <Toolbar sx={{ justifyContent: 'space-between', px: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <img 
-                        className="nav_logo" 
+            <Toolbar
+                sx={{
+                    justifyContent: 'space-between',
+                    px: { xs: 1, sm: 2 },
+                    minHeight: { xs: 48, sm: 64 },
+                }}
+            >
+                <Box
+                    sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        minWidth: 0,
+                        flex: '1 1 0',
+                        mr: { xs: 0.5, sm: 1 },
+                        maxHeight: { xs: 44, sm: 60 },
+                    }}
+                >
+                    <img
+                        className="nav_logo"
                         src={logoUrl}
                         alt="Fantasy Predictor text logo"
-                        style={{ maxHeight: '60px', objectFit: 'contain' }}
+                        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
                         onError={(e) => {
                             console.error('Navbar image failed to load');
                             e.target.style.display = 'none';
                         }}
                     />
                 </Box>
-                <Box>
+                <Box sx={{ flexShrink: 0 }}>
                     <IconButton
                         onClick={handleAvatarClick}
                         aria-label={isLoggedIn ? 'Account menu' : 'Go to login'}
@@ -95,7 +110,20 @@ function Navbar() {
                     >
                         <Avatar
                             src={user?.avatar_url ? apiUrl(user.avatar_url) : undefined}
-                            sx={{ bgcolor: user?.avatar_url ? 'transparent' : 'primary.main' }}
+                            sx={{
+                                width: { xs: 36, sm: 40 },
+                                height: { xs: 36, sm: 40 },
+                                ...(user?.avatar_url
+                                    ? { bgcolor: 'transparent' }
+                                    : isLoggedIn
+                                    ? {
+                                          bgcolor: 'background.paper',
+                                          border: '2px solid',
+                                          borderColor: 'primary.main',
+                                          color: 'primary.main',
+                                      }
+                                    : { bgcolor: 'primary.main' }),
+                            }}
                             variant="rounded"
                         >
                             {!user?.avatar_url && <AccountBoxIcon />}
