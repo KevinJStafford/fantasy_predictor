@@ -165,7 +165,7 @@ function LandingGrid() {
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
                         <Button
                             variant="contained"
-                            href="/#/users"
+                            href="/users"
                             onClick={(e) => { e.preventDefault(); history.push('/users'); }}
                             sx={{
                                 bgcolor: 'primary.main',
@@ -182,7 +182,7 @@ function LandingGrid() {
                         </Button>
                         <Button
                             variant="contained"
-                            href="/#/login"
+                            href="/login"
                             onClick={(e) => { e.preventDefault(); history.push('/login'); }}
                             sx={{
                                 bgcolor: 'primary.main',

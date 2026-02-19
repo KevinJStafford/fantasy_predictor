@@ -1,7 +1,7 @@
 import React from "react";
 import App from "./components/App";
 import "./index.css";
-import { HashRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router-dom";
 import ReactDOM from "react-dom";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
@@ -33,9 +33,9 @@ ReactDOM.render(
   <ErrorBoundary>
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <HashRouter>
+      <BrowserRouter>
         <App />
-      </HashRouter>
+      </BrowserRouter>
     </ThemeProvider>
   </ErrorBoundary>,
   document.getElementById("root")

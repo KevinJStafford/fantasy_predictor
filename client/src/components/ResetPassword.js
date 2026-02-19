@@ -22,10 +22,8 @@ function ResetPassword() {
     const history = useHistory();
     const location = useLocation();
     const [success, setSuccess] = useState(false);
-    // HashRouter: token can be in location.search or in the hash (#/reset-password?token=...)
-    const token =
-        new URLSearchParams(location.search).get('token') ||
-        new URLSearchParams((location.hash || '').split('?')[1] || '').get('token');
+    // Reset link: token in query string (e.g. /reset-password?token=...)
+    const token = new URLSearchParams(location.search).get('token');
 
     const formik = useFormik({
         initialValues: { password: '', confirm_password: '' },
@@ -61,7 +59,7 @@ function ResetPassword() {
                     <Typography color="error">
                         Missing reset link. Please use the link from your email or request a new one.
                     </Typography>
-                    <Button component="a" href="#/forgot-password" sx={{ mt: 2 }}>
+                    <Button component="a" href="/forgot-password" sx={{ mt: 2 }}>
                         Request new link
                     </Button>
                 </Container>
