@@ -70,12 +70,14 @@ function Navbar() {
     };
 
     return (
-        <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1 }}>
+        <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1, overflow: 'hidden' }}>
             <Toolbar
                 sx={{
                     justifyContent: 'space-between',
+                    alignItems: 'center',
                     px: { xs: 1, sm: 2 },
-                    minHeight: { xs: 52, sm: 72 },
+                    minHeight: { xs: 48, sm: 56 },
+                    height: { xs: 48, sm: 56 },
                 }}
             >
                 <Box
@@ -85,8 +87,8 @@ function Navbar() {
                         minWidth: 0,
                         flex: '1 1 0',
                         mr: { xs: 0.5, sm: 1 },
-                        height: { xs: 44, sm: 60 },
-                        maxHeight: { xs: 44, sm: 60 },
+                        height: { xs: 36, sm: 44 },
+                        flexShrink: 0,
                         overflow: 'hidden',
                     }}
                 >
@@ -94,7 +96,7 @@ function Navbar() {
                         className="nav_logo"
                         src={logoUrl}
                         alt="Fantasy Predictor text logo"
-                        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }}
+                        style={{ height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'contain', objectPosition: 'center', display: 'block', verticalAlign: 'middle' }}
                         onError={(e) => {
                             console.error('Navbar image failed to load');
                             e.target.style.display = 'none';
@@ -115,20 +117,21 @@ function Navbar() {
                             sx={{
                                 width: { xs: 36, sm: 40 },
                                 height: { xs: 36, sm: 40 },
+                                boxSizing: 'border-box',
                                 ...(user?.avatar_url
                                     ? { bgcolor: 'transparent' }
                                     : isLoggedIn
                                     ? {
-                                          bgcolor: 'background.paper',
-                                          border: '2px solid',
-                                          borderColor: 'primary.main',
-                                          color: 'primary.main',
+                                          bgcolor: '#ffffff',
+                                          border: '2px solid #ff6c26',
+                                          color: '#ff6c26',
+                                          '& .MuiSvgIcon-root': { color: '#ff6c26' },
                                       }
-                                    : { bgcolor: 'primary.main' }),
+                                    : { bgcolor: 'primary.main', color: '#fff', '& .MuiSvgIcon-root': { color: '#fff' } }),
                             }}
                             variant="rounded"
                         >
-                            {!user?.avatar_url && <AccountBoxIcon />}
+                            {!user?.avatar_url && <AccountBoxIcon sx={{ color: 'inherit' }} />}
                         </Avatar>
                     </IconButton>
                     <Menu
