@@ -516,68 +516,28 @@ def get_next_incomplete_round():
         return make_response({'error': str(e)}, 500)
 
 
-def _fixture_round_complete(f):
-    """True if this fixture counts as complete for round-completion (has both scores or is_completed set)."""
-    has_scores = (
-        getattr(f, 'actual_home_score', None) is not None
-        and getattr(f, 'actual_away_score', None) is not None
-    )
-    if has_scores:
-        return True
-    ic = getattr(f, 'is_completed', None)
-    # Treat as incomplete only when explicitly False/0/None/empty/false string
-    if ic is None or ic is False or ic == 0:
-        return False
-    if isinstance(ic, str) and ic.strip().lower() in ('', 'false', '0', 'no', 'n'):
-        return False
-    return True
-
-
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the lowest round that has NOT fully completed yet.
-    A round is complete only when EVERY fixture in that round has both actual scores OR is_completed set."""
+    Uses DB logic: a round is incomplete if it has any fixture with (no scores) AND (is_completed is not true)."""
     try:
-        all_fixtures = Fixture.query.filter(Fixture.fixture_round.isnot(None)).all()
-        by_round = {}
-        for f in all_fixtures:
-            r = f.fixture_round
-            if r is not None:
-                try:
-                    r = int(r)
-                except (TypeError, ValueError):
-                    pass
-                by_round.setdefault(r, []).append(f)
-        completed_rounds = set()
-        for r, flist in by_round.items():
-            if all(_fixture_round_complete(f) for f in flist):
-                completed_rounds.add(r)
-        all_rounds_sorted = sorted(by_round.keys())
-        incomplete_rounds = [r for r in all_rounds_sorted if r not in completed_rounds]
+        from sqlalchemy import distinct
+        # Rounds that have at least one incomplete fixture: (missing scores) and (not completed)
+        incomplete_query = (
+            db.session.query(distinct(Fixture.fixture_round))
+            .filter(Fixture.fixture_round.isnot(None))
+            .filter(or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None)))
+            .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
+        )
+        incomplete_rows = incomplete_query.all()
+        incomplete_rounds = sorted([int(r[0]) for r in incomplete_rows if r[0] is not None])
         if incomplete_rounds:
             round_num = incomplete_rounds[0]
         else:
-            round_num = max(by_round.keys(), default=None) if by_round else None
-        if round_num is not None:
-            try:
-                round_num = int(round_num)
-            except (TypeError, ValueError):
-                pass
-        # Optional debug: ?debug=1 returns why (for support)
-        if request.args.get('debug'):
-            debug = {
-                'round': round_num,
-                'round_26_count': len(by_round.get(26, [])),
-                'round_26_complete': 26 in completed_rounds,
-                'round_26_incomplete_reasons': [
-                    {'id': f.id, 'is_completed': getattr(f, 'is_completed', None), 'has_scores': getattr(f, 'actual_home_score', None) is not None and getattr(f, 'actual_away_score', None) is not None}
-                    for f in by_round.get(26, []) if not _fixture_round_complete(f)
-                ],
-                'incomplete_rounds': incomplete_rounds[:10],
-            }
-            resp = make_response({'round': round_num, 'debug': debug}, 200)
-        else:
-            resp = make_response({'round': round_num}, 200)
+            # All rounds complete: return latest round
+            max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
+            round_num = int(max_row[0]) if max_row and max_row[0] is not None else None
+        resp = make_response({'round': round_num}, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
     except Exception as e:
