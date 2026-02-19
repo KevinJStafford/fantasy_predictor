@@ -85,14 +85,16 @@ function Navbar() {
                         minWidth: 0,
                         flex: '1 1 0',
                         mr: { xs: 0.5, sm: 1 },
+                        height: { xs: 44, sm: 60 },
                         maxHeight: { xs: 44, sm: 60 },
+                        overflow: 'hidden',
                     }}
                 >
                     <img
                         className="nav_logo"
                         src={logoUrl}
                         alt="Fantasy Predictor text logo"
-                        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
+                        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }}
                         onError={(e) => {
                             console.error('Navbar image failed to load');
                             e.target.style.display = 'none';
