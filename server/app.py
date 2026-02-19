@@ -516,6 +516,22 @@ def get_next_incomplete_round():
         return make_response({'error': str(e)}, 500)
 
 
+def _fixture_round_complete(f):
+    """True if this fixture counts as complete for round-completion (has both scores or is_completed truthy)."""
+    has_scores = (
+        getattr(f, 'actual_home_score', None) is not None
+        and getattr(f, 'actual_away_score', None) is not None
+    )
+    if has_scores:
+        return True
+    ic = getattr(f, 'is_completed', None)
+    if ic is True or ic == 1:
+        return True
+    if ic is not None and str(ic).strip().lower() in ('true', '1', 'yes'):
+        return True
+    return False
+
+
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
     """Return the default game week: the lowest round that has NOT fully completed yet.
@@ -527,21 +543,26 @@ def get_current_round():
         for f in all_fixtures:
             r = f.fixture_round
             if r is not None:
+                try:
+                    r = int(r)
+                except (TypeError, ValueError):
+                    pass
                 by_round.setdefault(r, []).append(f)
-        # Round is complete if every fixture has (both scores) or is_completed
+        # Round is complete if every fixture has (both scores) or is_completed (truthy)
         completed_rounds = set()
         for r, flist in by_round.items():
-            if all(
-                (getattr(f, 'actual_home_score', None) is not None and getattr(f, 'actual_away_score', None) is not None)
-                or getattr(f, 'is_completed', False)
-                for f in flist
-            ):
+            if all(_fixture_round_complete(f) for f in flist):
                 completed_rounds.add(r)
-        incomplete_rounds = [r for r in by_round.keys() if r not in completed_rounds]
+        incomplete_rounds = sorted([r for r in by_round.keys() if r not in completed_rounds])
         if incomplete_rounds:
-            round_num = min(incomplete_rounds)
+            round_num = incomplete_rounds[0]
         else:
             round_num = max(by_round.keys(), default=None)
+        if round_num is not None:
+            try:
+                round_num = int(round_num)
+            except (TypeError, ValueError):
+                pass
         resp = make_response({'round': round_num}, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         return resp
