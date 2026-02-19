@@ -22,6 +22,69 @@ from models import User, Game, Prediction, Fixture, League, LeagueMembership, Le
 from sqlalchemy import func, or_, select
 
 
+def _normalize_team_name(s):
+    """Normalize team name for matching (e.g. 'Brighton & Hove Albion' vs 'Brighton and Hove Albion')."""
+    if s is None:
+        return ''
+    t = (s or '').strip().lower()
+    t = t.replace('&', 'and').replace('  ', ' ')
+    while '  ' in t:
+        t = t.replace('  ', ' ')
+    return t
+
+
+# Common short names / aliases for Premier League teams (normalized key -> normalized canonical name)
+_TEAM_ALIASES = {
+    'wolves': 'wolverhampton wanderers',
+    'spurs': 'tottenham hotspur',
+    'tottenham': 'tottenham hotspur',
+    'man utd': 'manchester united',
+    'man united': 'manchester united',
+    'man utd.': 'manchester united',
+    "man u": 'manchester united',
+    'man city': 'manchester city',
+    'city': 'manchester city',
+    'west ham': 'west ham united',
+    'forest': 'nottingham forest',
+    'notts forest': 'nottingham forest',
+    'newcastle': 'newcastle united',
+    'brighton': 'brighton and hove albion',
+    'villa': 'aston villa',
+    'bournemouth': 'afc bournemouth',
+    'utd': 'manchester united',  # risky but common
+}
+
+
+def _team_names_equivalent(a, b):
+    """True if both team names refer to the same team (normalized + aliases)."""
+    an = _normalize_team_name(a)
+    bn = _normalize_team_name(b)
+    if an == bn:
+        return True
+    ac = _TEAM_ALIASES.get(an, an)
+    bc = _TEAM_ALIASES.get(bn, bn)
+    return ac == bc
+
+
+def _fixture_matches_game(fixture, home_team, away_team):
+    """True if fixture's teams match the given home/away (exact, case-insensitive, normalized, or alias)."""
+    if not fixture or not fixture.fixture_home_team or not fixture.fixture_away_team:
+        return False
+    f_h = (fixture.fixture_home_team or '').strip()
+    f_a = (fixture.fixture_away_team or '').strip()
+    g_h = (home_team or '').strip()
+    g_a = (away_team or '').strip()
+    if f_h == g_h and f_a == g_a:
+        return True
+    if f_h.lower() == g_h.lower() and f_a.lower() == g_a.lower():
+        return True
+    if _normalize_team_name(f_h) == _normalize_team_name(g_h) and _normalize_team_name(f_a) == _normalize_team_name(g_a):
+        return True
+    if _team_names_equivalent(f_h, g_h) and _team_names_equivalent(f_a, g_a):
+        return True
+    return False
+
+
 def _verify_password(user_id, password_str):
     """Verify password without touching User.authenticate (avoids recursion with ORM).
     Fetches hash via a simple column query."""
@@ -1556,27 +1619,26 @@ def check_prediction_results():
         print(f"DEBUG check-results: Checking {len(user_games)} predictions for user {user_id}")
         
         for game in user_games:
-            # Find matching fixture - try exact match first
+            # Find matching fixture - exact, then case-insensitive, then normalized (& vs and, etc.)
             fixture = Fixture.query.filter_by(
                 fixture_home_team=game.home_team,
                 fixture_away_team=game.away_team
             ).first()
-            
-            # If not found, try case-insensitive match
             if not fixture:
-                all_fixtures = Fixture.query.all()
-                for f in all_fixtures:
-                    if (f.fixture_home_team and f.fixture_away_team and 
-                        f.fixture_home_team.lower().strip() == game.home_team.lower().strip() and
-                        f.fixture_away_team.lower().strip() == game.away_team.lower().strip()):
+                for f in Fixture.query.all():
+                    if _fixture_matches_game(f, game.home_team, game.away_team):
                         fixture = f
                         break
-            
             if not fixture:
                 fixtures_not_found += 1
                 if fixtures_not_found <= 3:
                     print(f"DEBUG check-results: Fixture not found for prediction: {game.home_team} vs {game.away_team}")
                 continue
+
+            # Keep game team names in sync with fixture (e.g. after sync changed "Man Utd" to "Manchester United")
+            if game.home_team != fixture.fixture_home_team or game.away_team != fixture.fixture_away_team:
+                game.home_team = fixture.fixture_home_team
+                game.away_team = fixture.fixture_away_team
             
             # Treat as completed if we have both scores (even when is_completed is False), so results and leaderboard update
             if fixture.actual_home_score is None or fixture.actual_away_score is None:
@@ -2377,9 +2439,7 @@ def get_league_leaderboard(league_id):
             if f:
                 return f
             for f in Fixture.query.all():
-                if (f.fixture_home_team and f.fixture_away_team and
-                        f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
-                        f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
+                if _fixture_matches_game(f, game.home_team, game.away_team):
                     return f
             return None
 
@@ -2393,7 +2453,7 @@ def get_league_leaderboard(league_id):
             if g:
                 return True
             for g in Game.query.filter_by(user_id=member_id).all():
-                if (g.home_team or '').lower().strip() == (fixture.fixture_home_team or '').lower().strip() and (g.away_team or '').lower().strip() == (fixture.fixture_away_team or '').lower().strip():
+                if _fixture_matches_game(fixture, g.home_team, g.away_team):
                     return True
             return False
 
