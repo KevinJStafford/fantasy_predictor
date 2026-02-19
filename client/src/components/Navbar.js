@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import Avatar from '@mui/material/Avatar';
 import { Box, AppBar, Toolbar, IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
+import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useHistory } from 'react-router-dom';
 import { getToken, removeToken } from '../utils/auth';
@@ -63,6 +64,11 @@ function Navbar() {
         history.push('/player');
     };
 
+    const handleProfile = () => {
+        setAnchorEl(null);
+        history.push('/profile');
+    };
+
     return (
         <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1 }}>
             <Toolbar sx={{ justifyContent: 'space-between', px: 2 }}>
@@ -104,6 +110,10 @@ function Navbar() {
                         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
                         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
                     >
+                        <MenuItem onClick={handleProfile}>
+                            <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
+                            <ListItemText>Profile</ListItemText>
+                        </MenuItem>
                         <MenuItem onClick={handleMyLeagues}>
                             <ListItemText>My leagues</ListItemText>
                         </MenuItem>

@@ -9,6 +9,7 @@ import ForgotPassword from "./ForgotPassword";
 import ResetPassword from "./ResetPassword";
 import Members from "./Members";
 import Leagues from "./Leagues";
+import Profile from "./Profile";
 
 function App() {
   // eslint-disable-next-line no-unused-vars
@@ -35,6 +36,9 @@ function App() {
         </Route>
         <Route exact path="/leagues">
           <Leagues />
+        </Route>
+        <Route exact path="/profile">
+          <Profile />
         </Route>
         <Route exact path="/player">
           <Members />

@@ -1759,6 +1759,12 @@ def update_current_user():
             return make_response({'error': 'An account with that email already exists'}, 400)
         user.email = new_email
         updated = True
+    new_username = (data.get('username') or '').strip() or None
+    if new_username != (user.username or None):
+        if new_username and get_active_user_by_username(new_username) and get_active_user_by_username(new_username).id != user_id:
+            return make_response({'error': 'That name is already in use'}, 400)
+        user.username = new_username
+        updated = True
     new_password = (data.get('new_password') or '').strip()
     if new_password:
         confirm = (data.get('confirm_password') or '').strip()
