@@ -49,6 +49,7 @@ function Signup({setUser}) {
                             saveToken(token)
                         }
                         setUser(user)
+                        window.dispatchEvent(new Event('user-updated'))
                         history.push('/leagues')
                     })
                 } else {

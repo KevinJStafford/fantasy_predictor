@@ -75,7 +75,7 @@ function Navbar() {
                 sx={{
                     justifyContent: 'space-between',
                     px: { xs: 1, sm: 2 },
-                    minHeight: { xs: 48, sm: 64 },
+                    minHeight: { xs: 52, sm: 72 },
                 }}
             >
                 <Box

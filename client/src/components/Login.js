@@ -19,6 +19,7 @@ function Login({setUser}) {
                 if (resp.ok) {
                     return resp.json().then((user) => {
                         setUser(user);
+                        window.dispatchEvent(new Event('user-updated'));
                         history.push('/leagues');
                     });
                 }
@@ -51,6 +52,7 @@ function Login({setUser}) {
                             saveToken(token)
                         }
                         setUser(user)
+                        window.dispatchEvent(new Event('user-updated'))
                         history.push('/leagues')
                     })
                 } else {
