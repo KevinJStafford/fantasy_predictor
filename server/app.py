@@ -2783,6 +2783,25 @@ def run_migrations():
         return make_response({'error': str(e), 'details': error_details.split('\n')[-5:]}, 500)
 
 
+# SPA fallback: serve React app's index.html for non-API GET requests (fixes refresh 404)
+_CLIENT_BUILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'client', 'build')
+
+
+@app.route('/', defaults={'path': ''}, methods=['GET'])
+@app.route('/<path:path>', methods=['GET'])
+def serve_spa(path):
+    """Serve the React app for any GET that isn't API/uploads so client-side routing works on refresh."""
+    if path.startswith('api/') or path.startswith('uploads/'):
+        return make_response({'error': 'Not found'}, 404)
+    if not os.path.isdir(_CLIENT_BUILD):
+        return make_response({'error': 'Not found'}, 404)
+    # If the path exists as a file (e.g. /static/js/main.xxx.js), serve it
+    full_path = os.path.join(_CLIENT_BUILD, path)
+    if path and os.path.isfile(full_path):
+        return send_from_directory(_CLIENT_BUILD, path)
+    return send_from_directory(_CLIENT_BUILD, 'index.html')
+
+
 if __name__ == '__main__':
     import os
     port = int(os.getenv('PORT', 5555))
