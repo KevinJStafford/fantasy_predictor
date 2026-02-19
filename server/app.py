@@ -2412,9 +2412,14 @@ def get_league_leaderboard(league_id):
             for f in Fixture.query.all():
                 if f.fixture_round is not None and _fixture_date_on_or_after_league(f, None, league_created_at):
                     all_fixtures_by_round.setdefault(f.fixture_round, []).append(f)
+            # Round is complete if every fixture has both scores, or is marked is_completed (e.g. rescheduled match)
             completed_rounds = []
             for r, flist in all_fixtures_by_round.items():
-                if all(f.actual_home_score is not None and f.actual_away_score is not None for f in flist):
+                if all(
+                    (f.actual_home_score is not None and f.actual_away_score is not None)
+                    or getattr(f, 'is_completed', False)
+                    for f in flist
+                ):
                     completed_rounds.append(r)
             # Backfill: award week winner(s) for any completed round we haven't recorded yet
             for round_num in completed_rounds:
