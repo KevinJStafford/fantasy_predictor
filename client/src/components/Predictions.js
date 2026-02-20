@@ -4,7 +4,7 @@ import {
     TableRow, TableCell,
 } from "@mui/material"
 import { useFormik } from 'formik';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as yup from 'yup';
 import { authenticatedFetch } from '../utils/api';
 
@@ -64,6 +64,8 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
         enableReinitialize: true,
         validationSchema: predictionSchema,
         onSubmit: (values) => {
+            // Never send if game has started (defense in depth; inputs are already disabled)
+            if (gameStarted) return
             setSaving(true)
             setMessage(null)
             
@@ -114,6 +116,24 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingPrediction?.id, existingPrediction?.home_team_score, existingPrediction?.away_team_score])
 
+    // Auto-save when both scores are valid (debounced). Only when user has changed something.
+    const autoSaveTimeoutRef = useRef(null)
+    const isValidScore = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0
+    useEffect(() => {
+        if (gameStarted) return
+        const home = formik.values.home_team_score
+        const away = formik.values.away_team_score
+        const bothValid = isValidScore(home) && isValidScore(away)
+        if (!formik.dirty || !bothValid) return
+        autoSaveTimeoutRef.current = setTimeout(() => {
+            formik.submitForm()
+        }, 700)
+        return () => {
+            if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [formik.values.home_team_score, formik.values.away_team_score, formik.dirty, gameStarted])
+
     const formatKickoffLocal = (value) => {
         const date = parseUtcDate(value)
         if (!date) return 'Date TBD'
@@ -139,11 +159,11 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
         }).format(date)
     }
 
-    // Table row layout: Home | Score | Away | Score | Save (form attribute links inputs to form in last cell)
+    // Table row layout: Home | Score | Away | Score | Day/Time | Status (auto-save when both scores valid)
     const hasExisting = !!existingPrediction
-    const formId = `prediction-form-${id}`
     const saveButtonLabel = saving ? 'Saving...' : gameStarted ? (asTableRow ? 'Locked' : 'Game Started') : (hasExisting ? 'Update' : (asTableRow ? 'Save' : 'Save Prediction'))
     const saveButtonSx = hasExisting ? { backgroundColor: 'white', color: 'primary.main', borderColor: 'primary.main', '&:hover': { backgroundColor: 'grey.50', borderColor: 'primary.dark', color: 'primary.dark' } } : {}
+    const rowStatus = saving ? 'Saving...' : message?.type === 'success' ? 'Saved' : ''
     if (asTableRow) {
         return (
             <TableRow>
@@ -158,7 +178,7 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                         value={formik.values.home_team_score}
                         onChange={formik.handleChange}
                         error={formik.touched.home_team_score && Boolean(formik.errors.home_team_score)}
-                        inputProps={{ form: formId, min: 0, max: 20, style: { textAlign: 'center' } }}
+                        inputProps={{ min: 0, max: 20, style: { textAlign: 'center' } }}
                         disabled={gameStarted}
                         sx={{ width: 64 }}
                     />
@@ -174,25 +194,14 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                         value={formik.values.away_team_score}
                         onChange={formik.handleChange}
                         error={formik.touched.away_team_score && Boolean(formik.errors.away_team_score)}
-                        inputProps={{ form: formId, min: 0, max: 20, style: { textAlign: 'center' } }}
+                        inputProps={{ min: 0, max: 20, style: { textAlign: 'center' } }}
                         disabled={gameStarted}
                         sx={{ width: 64 }}
                     />
                 </TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
-                <TableCell align="center" sx={{ width: 100 }}>
-                    <form id={formId} onSubmit={formik.handleSubmit}>
-                        <Button
-                            type="submit"
-                            variant={hasExisting ? 'outlined' : 'contained'}
-                            color="primary"
-                            size="small"
-                            disabled={saving || gameStarted}
-                            sx={saveButtonSx}
-                        >
-                            {saveButtonLabel}
-                        </Button>
-                    </form>
+                <TableCell align="center" sx={{ width: 80, fontSize: '0.875rem', color: 'text.secondary' }}>
+                    {rowStatus}
                 </TableCell>
             </TableRow>
         )

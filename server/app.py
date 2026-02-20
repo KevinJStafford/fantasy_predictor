@@ -1152,6 +1152,15 @@ class PredictionsResource(Resource):
             if not fixture:
                 return make_response({'error': 'Fixture not found'}, 404)
             
+            # Lock predictions after kickoff: do not allow create or update once the game has started
+            if fixture.fixture_date:
+                now_utc = datetime.now(timezone.utc)
+                kickoff = fixture.fixture_date
+                if getattr(kickoff, 'tzinfo', None) is None:
+                    kickoff = kickoff.replace(tzinfo=timezone.utc)
+                if now_utc >= kickoff:
+                    return make_response({'error': 'Cannot create or update prediction after kickoff'}, 403)
+            
             # Check if user already has a prediction for this fixture
             existing_game = Game.query.filter_by(
                 user_id=user_id,
