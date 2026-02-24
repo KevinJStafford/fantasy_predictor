@@ -443,7 +443,7 @@ SUPPORTED_COMPETITIONS = [
     {'slug': 'ita.1', 'name': 'Serie A', 'source': 'football_data', 'football_data_code': 'SA'},
     {'slug': 'uefa.cl', 'name': 'UEFA Champions League', 'source': 'football_data', 'football_data_code': 'CL'},
     {'slug': 'usa.1', 'name': 'MLS', 'source': 'espn', 'espn_slug': 'usa.1'},
-    {'slug': 'fifa.world', 'name': 'FIFA World Cup', 'source': 'football_data', 'football_data_code': 'WC'},
+    {'slug': 'fifa.world', 'name': 'FIFA World Cup', 'source': 'espn', 'espn_slug': 'fifa.world'},
 ]
 
 
@@ -534,12 +534,81 @@ def _fetch_standings_data():
         return None, None
 
 
+def _fetch_standings_football_data(competition_code):
+    """Fetch standings from football-data.org for a competition (e.g. BL1, SA). Returns (standings_list, competition_name) or (None, None)."""
+    api_key = (os.getenv('FOOTBALL_DATA_ORG_API_KEY') or '').strip()
+    if not api_key:
+        return None, None
+    url = f'{FOOTBALL_DATA_ORG_BASE}/competitions/{competition_code}/standings'
+    headers = {'X-Auth-Token': api_key, 'User-Agent': 'FantasyPredictor/1.0'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException:
+        return None, None
+    competition_name = (data.get('competition') or {}).get('name') or 'League'
+    standings_raw = data.get('standings') or []
+    # League has one entry (type TOTAL); LEAGUE_CUP has multiple (groups). Take first table.
+    table = []
+    for s in standings_raw:
+        if isinstance(s, dict) and s.get('type') == 'TOTAL' and isinstance(s.get('table'), list):
+            table = s['table']
+            break
+    if not table and standings_raw and isinstance(standings_raw[0], dict) and isinstance(standings_raw[0].get('table'), list):
+        table = standings_raw[0]['table']
+    out = []
+    for row in table:
+        if not isinstance(row, dict):
+            continue
+        team = row.get('team') or {}
+        name = team.get('name') or team.get('shortName') or '—'
+        played = row.get('playedGames', 0) or 0
+        won = row.get('won', 0) or 0
+        draw = row.get('draw', 0) or 0
+        lost = row.get('lost', 0) or 0
+        gf = row.get('goalsFor', 0) or 0
+        ga = row.get('goalsAgainst', 0) or 0
+        gd = row.get('goalDifference', 0) or (gf - ga)
+        pts = row.get('points', 0) or 0
+        out.append({
+            'position': row.get('position'),
+            'team': name,
+            'played': played,
+            'won': won,
+            'drawn': draw,
+            'lost': lost,
+            'goalsFor': gf,
+            'goalsAgainst': ga,
+            'goalDifference': gd,
+            'points': pts,
+        })
+    return out, competition_name
+
+
 @app.route('/api/v1/standings', methods=['GET'])
 def get_standings():
-    """Fetch current Premier League table from external API for display (no auth required)."""
+    """Fetch league table from external API. Query: ?competition=slug (default eng.1). No standings for fifa.world."""
     if not REQUESTS_AVAILABLE:
         return make_response({'error': 'Standings unavailable (requests not available).'}, 503)
+    competition = (request.args.get('competition') or 'eng.1').strip()
+    if competition == 'fifa.world':
+        return make_response({'standings': [], 'competition_name': 'FIFA World Cup', 'matchweek': None}, 200)
     try:
+        comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == competition), None)
+        if comp and comp.get('source') == 'football_data' and comp.get('football_data_code'):
+            standings_list, comp_name = _fetch_standings_football_data(comp['football_data_code'])
+            if standings_list is not None:
+                return make_response({
+                    'matchweek': None,
+                    'standings': standings_list,
+                    'competition_name': comp_name or comp.get('name', 'League'),
+                }, 200)
+            return make_response({'error': 'Could not fetch standings (check FOOTBALL_DATA_ORG_API_KEY or competition has no table).', 'standings': [], 'competition_name': comp.get('name', '')}, 502)
+        if comp and comp.get('source') == 'espn':
+            # ESPN leagues (La Liga, Ligue 1, MLS): no standings API in this app
+            return make_response({'standings': [], 'competition_name': comp.get('name', 'League'), 'matchweek': None}, 200)
+        # Premier League (eng.1 or default)
         url = request.args.get('api_url') or STANDINGS_API_URL
         resp = requests.get(url, headers={'Accept': 'application/json'}, timeout=15)
         resp.raise_for_status()
@@ -566,6 +635,7 @@ def get_standings():
         return make_response({
             'matchweek': matchweek,
             'standings': standings,
+            'competition_name': 'Premier League',
         }, 200)
     except requests.RequestException as e:
         return make_response({'error': f'Could not fetch standings: {str(e)}'}, 502)
@@ -1936,8 +2006,11 @@ Predict the full-time score. Consider table position, form, and home advantage. 
 @app.route('/api/v1/fixtures/sync-scores', methods=['POST'])
 def sync_fixture_scores():
     """
-    Sync completed fixtures with actual scores from the Premier League API.
+    Sync completed fixtures with actual scores from the Premier League (pulselive) API.
     Updates fixtures that have been played with their actual scores.
+    For non-Premier League (Bundesliga, World Cup, etc.), scores are updated when running
+    fixture sync (POST /api/v1/fixtures/sync) with the league's source; the client triggers
+    that sync on admin page load for non-PL leagues.
     """
     print("DEBUG sync-scores: Function called")
     try:

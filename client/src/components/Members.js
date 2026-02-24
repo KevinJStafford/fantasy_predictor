@@ -111,28 +111,33 @@ function Members() {
             .catch(() => setCompetitions([]))
     }, [])
 
-    // Fetch Premier League standings (no auth) only when EPL is selected
+    // Fetch league standings for current competition (all except World Cup)
+    const [standingsTitle, setStandingsTitle] = useState('')
     useEffect(() => {
-        if (selectedCompetition !== 'eng.1') {
+        if (effectiveCompetition === 'fifa.world' || !effectiveCompetition) {
             setPlStandings(null)
             setStandingsError(null)
+            setStandingsTitle('')
             return
         }
         setLoadingStandings(true)
         setStandingsError(null)
-        fetch(apiUrl('/api/v1/standings'))
+        setStandingsTitle('')
+        const url = apiUrl('/api/v1/standings') + '?competition=' + encodeURIComponent(effectiveCompetition)
+        fetch(url)
             .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Failed to load standings') }))
             .then(data => {
                 setPlStandings(data.standings || [])
+                setStandingsTitle(data.competition_name || '')
             })
             .catch(err => {
-                setStandingsError(err.message || 'Could not load Premier League table')
+                setStandingsError(err.message || 'Could not load league table')
                 setPlStandings([])
             })
             .finally(() => setLoadingStandings(false))
-    }, [selectedCompetition])
+    }, [effectiveCompetition])
 
-    // On league page load: refresh results (check-results) for everyone; admins also trigger sync-scores in background
+    // On league page load: refresh results (check-results) for everyone; admins also refresh scores from the right source
     const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
     useEffect(() => {
         if (!leagueId) return
@@ -145,25 +150,41 @@ function Members() {
             .catch(() => {})
 
         if (!isAdmin) return
-
-        // Admin: sync scores from external API in background, then refresh results again
+        // Admin: refresh scores. Premier League uses sync-scores (pulselive); other leagues use fixture sync (football-data.org / ESPN) which updates scores too.
+        const comp = competitions.find(c => c.slug === effectiveCompetition)
+        const isFootballData = (comp && comp.source === 'football_data') || ['ger.1', 'ita.1', 'uefa.cl', 'fifa.world', 'eng.2'].includes(effectiveCompetition)
+        const isEspn = comp && comp.source === 'espn'
+        const isPremierLeague = effectiveCompetition === 'eng.1'
+        const syncBody = !isPremierLeague
+            ? (isFootballData
+                ? { source: 'football_data', league_slug: comp?.slug || effectiveCompetition, competition: comp?.slug || effectiveCompetition }
+                : isEspn
+                    ? { source: 'espn', league_slug: comp?.espn_slug || comp?.slug || effectiveCompetition }
+                    : { api_url: comp?.api_url || SYNC_SCORES_API_URL })
+            : { api_url: SYNC_SCORES_API_URL }
         setSyncing(true)
-        authenticatedFetch('/api/v1/fixtures/sync-scores', {
-            method: 'POST',
-            body: JSON.stringify({ api_url: SYNC_SCORES_API_URL })
-        })
+        const syncPromise = isPremierLeague
+            ? authenticatedFetch('/api/v1/fixtures/sync-scores', { method: 'POST', body: JSON.stringify(syncBody) })
+            : authenticatedFetch(apiUrl('/api/v1/fixtures/sync'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(syncBody)
+              })
+        syncPromise
             .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
             .then(data => {
-                if (data.error) throw new Error(data.error)
+                if (data && data.error) throw new Error(data.error)
                 return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
             })
             .then(() => {
                 getPredictions()
                 fetchLeaderboard()
+                if (leagueId) getAvailableRounds()
+                if (leagueId) loadCurrentRoundAndFixtures()
             })
             .catch(() => {})
             .finally(() => setSyncing(false))
-    }, [leagueId, isAdmin])
+    }, [leagueId, isAdmin, effectiveCompetition])
 
     function getAvailableRounds() {
         const q = effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : ''
@@ -812,13 +833,13 @@ function Members() {
                 )}
             </Grid>
 
-            {/* Right side: Premier League table (when EPL selected) + Leaderboard */}
+            {/* Right side: League table (all leagues except World Cup) + Leaderboard */}
             <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
-                {selectedCompetition === 'eng.1' && (
+                {effectiveCompetition && effectiveCompetition !== 'fifa.world' && (
                 <Card variant="outlined" sx={{ mb: 2 }}>
                     <CardContent sx={{ px: 0, '&:last-child': { pb: 2 }, pt: 2, pb: 0 }}>
                         <Typography variant="h6" component="h3" sx={{ mb: 1.5, fontWeight: 600, px: 2 }}>
-                            Premier League table
+                            {standingsTitle || 'League table'}
                         </Typography>
                         {loadingStandings ? (
                             <Typography variant="body2" color="text.secondary">Loading…</Typography>
