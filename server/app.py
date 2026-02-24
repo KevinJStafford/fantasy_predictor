@@ -9,7 +9,7 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date, time
 import jwt
 
 # Remote library imports
@@ -395,7 +395,8 @@ api.add_resource(Users, '/api/v1/users')
 
 class Fixtures(Resource):
     def get(self, round_number=None):
-        """Get all fixtures or fixtures for a specific round (current season only when competition set). Optional query: ?competition=slug."""
+        """Get all fixtures or fixtures for a specific round (current season only when competition set). Optional query: ?competition=slug.
+        For fifa.world, round_number is Day 1/2/3... (grouped by scheduled calendar day)."""
         competition = request.args.get('competition') or None
         base = Fixture.query
         comp_filter = _fixture_query_competition(competition)
@@ -405,7 +406,16 @@ class Fixtures(Resource):
         if season_start is not None:
             base = base.filter(Fixture.fixture_date >= season_start)
         if round_number:
-            base = base.filter(Fixture.fixture_round == round_number)
+            if competition == 'fifa.world':
+                day_dates = _world_cup_day_dates(comp_filter, season_start)
+                if 1 <= round_number <= len(day_dates):
+                    day_start = datetime.combine(day_dates[round_number - 1], time.min)
+                    day_end = day_start + timedelta(days=1)
+                    base = base.filter(Fixture.fixture_date >= day_start).filter(Fixture.fixture_date < day_end)
+                else:
+                    base = base.filter(Fixture.id == -1)
+            else:
+                base = base.filter(Fixture.fixture_round == round_number)
         fixtures = [
             f.to_dict()
             for f in base.order_by(Fixture.fixture_date.asc()).all()
@@ -444,6 +454,23 @@ def _fixture_query_competition(competition_slug):
     if competition_slug == 'eng.1':
         return or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None))
     return Fixture.competition_slug == competition_slug
+
+
+def _world_cup_day_dates(comp_filter, season_start=None):
+    """For fifa.world: return ordered list of distinct fixture dates (by calendar day). Used for Day 1/2/3 grouping."""
+    q = db.session.query(Fixture.fixture_date).filter(comp_filter).filter(Fixture.fixture_date.isnot(None))
+    if season_start is not None:
+        q = q.filter(Fixture.fixture_date >= season_start)
+    rows = q.all()
+    seen = set()
+    out = []
+    for (dt,) in rows:
+        d = dt.date() if hasattr(dt, 'date') else (dt if isinstance(dt, date) else None)
+        if d is not None and d not in seen:
+            seen.add(d)
+            out.append(d)
+    out.sort()
+    return out
 
 
 def _current_season_start_for_competition(comp_filter):
@@ -547,7 +574,8 @@ def get_standings():
 
 @app.route('/api/v1/fixtures/rounds', methods=['GET'])
 def get_available_rounds():
-    """Get all available game week rounds from fixtures (current season only). Optional query: ?competition=slug."""
+    """Get all available game week rounds from fixtures (current season only). Optional query: ?competition=slug.
+    For fifa.world, rounds are Day 1, Day 2, ... by scheduled calendar day."""
     try:
         competition = request.args.get('competition') or None
         comp_filter = _fixture_query_competition(competition)
@@ -557,15 +585,19 @@ def get_available_rounds():
             base = base.filter(comp_filter)
         if season_start is not None:
             base = base.filter(Fixture.fixture_date >= season_start)
-        rounds_q = db.session.query(Fixture.fixture_round).distinct().filter(Fixture.fixture_round.isnot(None))
-        if comp_filter is not None:
-            rounds_q = rounds_q.filter(comp_filter)
-        if season_start is not None:
-            rounds_q = rounds_q.filter(Fixture.fixture_date >= season_start)
-        rounds = rounds_q.order_by(Fixture.fixture_round).all()
-        round_numbers = [r[0] for r in rounds]
+        if competition == 'fifa.world':
+            day_dates = _world_cup_day_dates(comp_filter, season_start)
+            round_numbers = list(range(1, len(day_dates) + 1))
+        else:
+            rounds_q = db.session.query(Fixture.fixture_round).distinct().filter(Fixture.fixture_round.isnot(None))
+            if comp_filter is not None:
+                rounds_q = rounds_q.filter(comp_filter)
+            if season_start is not None:
+                rounds_q = rounds_q.filter(Fixture.fixture_date >= season_start)
+            rounds = rounds_q.order_by(Fixture.fixture_round).all()
+            round_numbers = [r[0] for r in rounds]
         total_fixtures = base.count()
-        fixtures_with_rounds = base.filter(Fixture.fixture_round.isnot(None)).count()
+        fixtures_with_rounds = len(round_numbers) if round_numbers else 0
         fixtures_without_rounds = total_fixtures - fixtures_with_rounds
 
         print(f"DEBUG get_available_rounds: competition={competition!r} Total fixtures: {total_fixtures}, With rounds: {fixtures_with_rounds}, Without rounds: {fixtures_without_rounds}")
@@ -599,11 +631,23 @@ def get_available_rounds():
 
 @app.route('/api/v1/fixtures/next-incomplete-round', methods=['GET'])
 def get_next_incomplete_round():
-    """Return the smallest game week (round) in the current season with at least one fixture not yet completed. Optional: ?competition=slug."""
+    """Return the smallest game week (round) in the current season with at least one fixture not yet completed. Optional: ?competition=slug.
+    For fifa.world, round is Day 1/2/3... (first day with an incomplete fixture)."""
     try:
         competition = request.args.get('competition') or None
         comp_filter = _fixture_query_competition(competition)
         season_start = _current_season_start_for_competition(comp_filter)
+        if competition == 'fifa.world':
+            day_dates = _world_cup_day_dates(comp_filter, season_start)
+            for day_index, d in enumerate(day_dates, start=1):
+                day_start = datetime.combine(d, time.min)
+                day_end = day_start + timedelta(days=1)
+                has_incomplete = Fixture.query.filter(comp_filter).filter(Fixture.fixture_date >= day_start).filter(Fixture.fixture_date < day_end).filter(
+                    or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
+                ).first() is not None
+                if has_incomplete:
+                    return make_response({'round': day_index}, 200)
+            return make_response({'round': len(day_dates) if day_dates else None}, 200)
         q = db.session.query(Fixture.fixture_round).filter(Fixture.is_completed == False).filter(Fixture.fixture_round.isnot(None))
         if comp_filter is not None:
             q = q.filter(comp_filter)
@@ -631,12 +675,28 @@ def get_next_incomplete_round():
 def get_current_round():
     """Return the default game week: the lowest round that has at least one non-completed fixture
     in the *current* season (season that contains the most recent fixture). If every round in that
-    season is complete, return the last round. Optional: ?competition=slug."""
+    season is complete, return the last round. Optional: ?competition=slug.
+    For fifa.world, round is Day 1/2/3... (first day with an incomplete fixture, or last day)."""
     try:
         from sqlalchemy import distinct
         competition = request.args.get('competition') or None
         comp_filter = _fixture_query_competition(competition)
         season_start = _current_season_start_for_competition(comp_filter)
+        if competition == 'fifa.world':
+            day_dates = _world_cup_day_dates(comp_filter, season_start)
+            round_num = None
+            for day_index, d in enumerate(day_dates, start=1):
+                day_start = datetime.combine(d, time.min)
+                day_end = day_start + timedelta(days=1)
+                has_incomplete = Fixture.query.filter(comp_filter).filter(Fixture.fixture_date >= day_start).filter(Fixture.fixture_date < day_end).filter(
+                    or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None))
+                ).filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))).first() is not None
+                if has_incomplete:
+                    round_num = day_index
+                    break
+            if round_num is None and day_dates:
+                round_num = len(day_dates)
+            return make_response({'round': round_num}, 200)
         incomplete_query = (
             db.session.query(distinct(Fixture.fixture_round))
             .filter(Fixture.fixture_round.isnot(None))
@@ -1586,9 +1646,22 @@ class PredictionsResource(Resource):
                     fixtures_found += 1
                     if fixture.is_completed:
                         fixtures_completed += 1
+                    # For World Cup, round = Day 1/2/3 (calendar day index) so frontend filter matches
+                    display_round = fixture.fixture_round
+                    if getattr(fixture, 'competition_slug', None) == 'fifa.world' and fixture.fixture_date:
+                        comp_filter_wc = _fixture_query_competition('fifa.world')
+                        season_start_wc = _current_season_start_for_competition(comp_filter_wc)
+                        day_dates_wc = _world_cup_day_dates(comp_filter_wc, season_start_wc)
+                        fd = fixture.fixture_date.date() if hasattr(fixture.fixture_date, 'date') else (fixture.fixture_date if isinstance(fixture.fixture_date, date) else None)
+                        if fd and day_dates_wc:
+                            try:
+                                day_index = day_dates_wc.index(fd) + 1
+                                display_round = day_index
+                            except ValueError:
+                                pass
                     prediction_data['fixture'] = {
                         'id': fixture.id,
-                        'round': fixture.fixture_round,
+                        'round': display_round,
                         'date': fixture.fixture_date.isoformat() if fixture.fixture_date else None,
                         'is_completed': fixture.is_completed,
                         'actual_home_score': fixture.actual_home_score,
