@@ -6,6 +6,7 @@ import os
 import secrets
 import smtplib
 import threading
+import unicodedata
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -875,6 +876,32 @@ ESPN_MAX_ROUNDS = {
     'eng.1': 38,
     'usa.1': 34,
 }
+# For fifa.world, assign Day 1/2/3 by calendar day in venue timezone (US Pacific), not UTC.
+WORLD_CUP_DAY_TZ = timezone(timedelta(hours=-7))
+
+
+def _normalize_team_name_for_match(name):
+    """Normalize team name for deduplication: casing, accents (Curaçao/Curcao), umlauts (München/Munich), etc."""
+    if not name or not isinstance(name, str):
+        return ''
+    s = name.strip().lower()
+    # Strip accents (Curaçao -> curacao, Iran/New Zealand already ascii)
+    s = unicodedata.normalize('NFKD', s)
+    s = ''.join(c for c in s if not unicodedata.combining(c))
+    # Umlauts -> ascii so München matches Munich
+    for char, repl in [('ü', 'ue'), ('ö', 'oe'), ('ä', 'ae'), ('ß', 'ss')]:
+        s = s.replace(char, repl)
+    # Drop common prefixes so "FC Bayern München" and "Bayern Munich" match
+    for prefix in ('fc ', 'afc ', 'ssc ', 'sc ', 'cf ', 'fk ', 'real ', 'atletico '):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+    # Place-name variants (German vs English)
+    s = s.replace('muenchen', 'munich')
+    s = s.replace('moenchengladbach', 'munchengladbach')
+    s = s.replace('&', ' and ')
+    while '  ' in s:
+        s = s.replace('  ', ' ')
+    return s.strip()
 
 
 def _sync_fixtures_espn(league_slug):
@@ -912,17 +939,29 @@ def _sync_fixtures_espn(league_slug):
                 if start_val and isinstance(start_val, str):
                     try:
                         start_dt = datetime.fromisoformat(start_val.replace('Z', '+00:00'))
+                        if start_dt.tzinfo is None:
+                            start_dt = start_dt.replace(tzinfo=timezone.utc)
                         end_dt = start_dt
                         if end_val and isinstance(end_val, str):
                             try:
                                 end_dt = datetime.fromisoformat(end_val.replace('Z', '+00:00'))
+                                if end_dt.tzinfo is None:
+                                    end_dt = end_dt.replace(tzinfo=timezone.utc)
                             except Exception:
                                 pass
+                        if phase_round is not None and league_slug == 'fifa.world':
+                            start_pacific = start_dt.astimezone(WORLD_CUP_DAY_TZ)
+                            end_pacific = end_dt.astimezone(WORLD_CUP_DAY_TZ)
+                            cur = start_pacific.date()
+                            end_date_pacific = end_pacific.date()
+                            while cur <= end_date_pacific:
+                                calendar_entries_by_date[cur.strftime('%Y%m%d')] = phase_round
+                                cur += timedelta(days=1)
                         d = start_dt
                         while d <= end_dt:
                             dstr = d.strftime('%Y%m%d')
                             dates_to_fetch.append(dstr)
-                            if phase_round is not None:
+                            if phase_round is not None and league_slug != 'fifa.world':
                                 calendar_entries_by_date[dstr] = phase_round
                             d += timedelta(days=1)
                     except Exception:
@@ -1014,7 +1053,16 @@ def _sync_fixtures_espn(league_slug):
             item['fixture_round'] = (i // matches_per_round) + 1
     else:
         for i, item in enumerate(collected):
-            item['fixture_round'] = calendar_entries_by_date.get(item['date_str'])
+            if league_slug == 'fifa.world' and item.get('fixture_date'):
+                fd = item['fixture_date']
+                if hasattr(fd, 'astimezone'):
+                    local_d = fd.astimezone(WORLD_CUP_DAY_TZ)
+                    lookup_dstr = local_d.date().strftime('%Y%m%d') if hasattr(local_d, 'date') else local_d.strftime('%Y%m%d')
+                    item['fixture_round'] = calendar_entries_by_date.get(lookup_dstr)
+                else:
+                    item['fixture_round'] = calendar_entries_by_date.get(item['date_str'])
+            else:
+                item['fixture_round'] = calendar_entries_by_date.get(item['date_str'])
             if item['fixture_round'] is None:
                 item['fixture_round'] = i + 1
     fixtures_added = 0
@@ -1030,6 +1078,31 @@ def _sync_fixtures_espn(league_slug):
                 Fixture.fixture_away_team == item['away_team'],
                 Fixture.fixture_date == item['fixture_date']
             ).first() if item['fixture_date'] else None
+        # Match by normalized names so "Iran v New Zealand" and "Iran v new zealand" / "Mexico v South Korea" dupes merge
+        if not existing:
+            norm_home = _normalize_team_name_for_match(item['home_team'])
+            norm_away = _normalize_team_name_for_match(item['away_team'])
+            if norm_home and norm_away:
+                if fixture_round is not None:
+                    candidates = Fixture.query.filter(
+                        Fixture.competition_slug == competition_slug,
+                        Fixture.fixture_round == fixture_round,
+                    ).all()
+                elif item.get('fixture_date'):
+                    day_start = item['fixture_date'].replace(hour=0, minute=0, second=0, microsecond=0) if hasattr(item['fixture_date'], 'replace') else item['fixture_date']
+                    day_end = day_start + timedelta(days=1) if hasattr(day_start, '__add__') else day_start
+                    candidates = Fixture.query.filter(
+                        Fixture.competition_slug == competition_slug,
+                        Fixture.fixture_date >= day_start,
+                        Fixture.fixture_date < day_end,
+                    ).all()
+                else:
+                    candidates = []
+                for c in candidates:
+                    if (_normalize_team_name_for_match(c.fixture_home_team) == norm_home and
+                            _normalize_team_name_for_match(c.fixture_away_team) == norm_away):
+                        existing = c
+                        break
         if existing:
             existing.fixture_round = fixture_round
             if item['fixture_date']:
@@ -1059,27 +1132,6 @@ def _sync_fixtures_espn(league_slug):
 
 # football-data.org provides official matchday numbers (e.g. Bundesliga). Requires FOOTBALL_DATA_ORG_API_KEY (free at https://www.football-data.org/).
 FOOTBALL_DATA_ORG_BASE = 'https://api.football-data.org/v4'
-
-
-def _normalize_team_name_for_match(name):
-    """Normalize team name for deduplication: same match can appear as 'FC Bayern München' vs 'Bayern Munich', etc."""
-    if not name or not isinstance(name, str):
-        return ''
-    s = name.strip().lower()
-    # Umlauts -> ascii so München matches Munich
-    for char, repl in [('ü', 'ue'), ('ö', 'oe'), ('ä', 'ae'), ('ß', 'ss')]:
-        s = s.replace(char, repl)
-    # Drop common prefixes so "FC Bayern München" and "Bayern Munich" match
-    for prefix in ('fc ', 'afc ', 'ssc ', 'sc ', 'cf ', 'fk ', 'real ', 'atletico '):
-        if s.startswith(prefix):
-            s = s[len(prefix):].strip()
-    # Place-name variants (German vs English)
-    s = s.replace('muenchen', 'munich')
-    s = s.replace('moenchengladbach', 'munchengladbach')
-    s = s.replace('&', ' and ')
-    while '  ' in s:
-        s = s.replace('  ', ' ')
-    return s.strip()
 
 
 def _sync_fixtures_football_data(competition_code, competition_slug):
