@@ -1,7 +1,7 @@
 import * as React from 'react'
 import Navbar from './Navbar'
 import {useEffect, useState, useCallback} from 'react'
-import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControlLabel, Radio, RadioGroup, Link } from '@mui/material'
+import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, FormControlLabel, Radio, RadioGroup, Checkbox, Link } from '@mui/material'
 import { useHistory, Link as RouterLink } from 'react-router-dom'
 import { authenticatedFetch } from '../utils/api'
 
@@ -19,6 +19,9 @@ function Leagues() {
     const [createDisplayName, setCreateDisplayName] = useState('')
     const [createIsOpen, setCreateIsOpen] = useState(false)
     const [createLeaderboardScope, setCreateLeaderboardScope] = useState('full_season')
+    const [createCompetition, setCreateCompetition] = useState('eng.1')
+    const [createAiPredictionsEnabled, setCreateAiPredictionsEnabled] = useState(false)
+    const [competitions, setCompetitions] = useState([])
     const [createError, setCreateError] = useState(null)
     const [openLeaguesSearch, setOpenLeaguesSearch] = useState('')
     const [openLeagues, setOpenLeagues] = useState([])
@@ -41,6 +44,13 @@ function Leagues() {
 
     useEffect(() => {
         fetchCurrentUser()
+    }, [])
+
+    useEffect(() => {
+        authenticatedFetch('/api/v1/competitions')
+            .then(res => res.ok ? res.json() : { competitions: [] })
+            .then(data => setCompetitions(data.competitions || []))
+            .catch(() => setCompetitions([]))
     }, [])
 
     function fetchLeagues() {
@@ -150,6 +160,8 @@ function Leagues() {
                 display_name: createDisplayName.trim(),
                 is_open: createIsOpen,
                 leaderboard_scope: createLeaderboardScope,
+                competition_slug: createCompetition,
+                ai_predictions_enabled: createAiPredictionsEnabled,
             })
         })
             .then(res => res.json())
@@ -160,6 +172,7 @@ function Leagues() {
                     setCreateDisplayName('')
                     setCreateIsOpen(false)
                     setCreateLeaderboardScope('full_season')
+                    setCreateAiPredictionsEnabled(false)
                     fetchLeagues()
                     fetchOpenLeagues()
                 } else {
@@ -380,11 +393,28 @@ function Leagues() {
                             <FormControlLabel value="open" control={<Radio />} label="Open to anyone (listed in Browse open leagues)" />
                             <FormControlLabel value="invite" control={<Radio />} label="Invite only (share code to join)" />
                         </RadioGroup>
+                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Real-world league to predict</Typography>
+                        <FormControl fullWidth variant="standard" sx={{ mt: 0.5, mb: 1 }}>
+                            <select
+                                value={createCompetition}
+                                onChange={(e) => setCreateCompetition(e.target.value)}
+                                style={{ padding: '8px 0', fontSize: '1rem', width: '100%', border: 'none', borderBottom: '1px solid rgba(0,0,0,0.42)', background: 'transparent' }}
+                            >
+                                {(competitions.length ? competitions : [{ slug: 'eng.1', name: 'English Premier League' }]).map(c => (
+                                    <option key={c.slug} value={c.slug}>{c.name}</option>
+                                ))}
+                            </select>
+                        </FormControl>
                         <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Leaderboard</Typography>
                         <RadioGroup row value={createLeaderboardScope} onChange={(e) => setCreateLeaderboardScope(e.target.value)}>
                             <FormControlLabel value="full_season" control={<Radio />} label="Full season (total points)" />
                             <FormControlLabel value="weekly" control={<Radio />} label="Weekly (week-by-week; track how many weeks each player wins)" />
                         </RadioGroup>
+                        <FormControlLabel
+                            control={<Checkbox checked={createAiPredictionsEnabled} onChange={(e) => setCreateAiPredictionsEnabled(e.target.checked)} />}
+                            label="Enable Ask AI (AI score suggestions for predictions)"
+                            sx={{ display: 'block', mt: 2 }}
+                        />
                         {createError && <Alert severity="error" sx={{ mt: 2 }}>{createError}</Alert>}
                     </DialogContent>
                     <DialogActions>

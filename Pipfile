@@ -15,6 +15,7 @@ flask-cors = "*"
 faker = "*"
 flask-bcrypt = "*"
 requests = "*"
+openai = "*"
 PyJWT = "*"
 psycopg2-binary = "*"
 

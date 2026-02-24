@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # Standard library imports
+import json
 import os
 import secrets
 import smtplib
@@ -326,6 +327,14 @@ except ImportError:
     print("Or activate the virtual environment first: pipenv shell")
     print("=" * 80)
 
+# OpenAI for Ask AI predictions (optional feature)
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    OpenAI = None
+
 # Views go here!
 class Users(Resource):
     def post(self):
@@ -386,19 +395,21 @@ api.add_resource(Users, '/api/v1/users')
 
 class Fixtures(Resource):
     def get(self, round_number=None):
-        """Get all fixtures or fixtures for a specific round"""
+        """Get all fixtures or fixtures for a specific round (current season only when competition set). Optional query: ?competition=slug."""
+        competition = request.args.get('competition') or None
+        base = Fixture.query
+        comp_filter = _fixture_query_competition(competition)
+        if comp_filter is not None:
+            base = base.filter(comp_filter)
+        season_start = _current_season_start_for_competition(comp_filter)
+        if season_start is not None:
+            base = base.filter(Fixture.fixture_date >= season_start)
         if round_number:
-            fixtures = [
-                f.to_dict()
-                for f in Fixture.query.filter_by(fixture_round=round_number)
-                .order_by(Fixture.fixture_date.asc())
-                .all()
-            ]
-        else:
-            fixtures = [
-                f.to_dict()
-                for f in Fixture.query.order_by(Fixture.fixture_date.asc()).all()
-            ]
+            base = base.filter(Fixture.fixture_round == round_number)
+        fixtures = [
+            f.to_dict()
+            for f in base.order_by(Fixture.fixture_date.asc()).all()
+        ]
         return make_response(fixtures, 200)
 
 api.add_resource(Fixtures, '/api/v1/fixtures', '/api/v1/fixtures/<int:round_number>')
@@ -408,6 +419,93 @@ STANDINGS_API_URL = os.getenv(
     'STANDINGS_API_URL',
     'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v5/competitions/8/seasons/2025/standings?live=false'
 )
+
+# Supported competitions for predictions.
+# source='premier_league' uses EXTERNAL_FIXTURES_API_URL; source='espn' uses ESPN API;
+# source='football_data' uses api.football-data.org (official matchdays; set FOOTBALL_DATA_ORG_API_KEY).
+# football-data.org free tier: https://www.football-data.org/coverage
+SUPPORTED_COMPETITIONS = [
+    {'slug': 'eng.1', 'name': 'English Premier League', 'source': 'premier_league', 'api_url': 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=400'},
+    {'slug': 'eng.2', 'name': 'EFL Championship', 'source': 'football_data', 'football_data_code': 'ELC'},
+    {'slug': 'esp.1', 'name': 'La Liga', 'source': 'espn', 'espn_slug': 'esp.1'},
+    {'slug': 'fra.1', 'name': 'Ligue 1', 'source': 'espn', 'espn_slug': 'fra.1'},
+    {'slug': 'ger.1', 'name': 'Bundesliga', 'source': 'football_data', 'football_data_code': 'BL1'},
+    {'slug': 'ita.1', 'name': 'Serie A', 'source': 'football_data', 'football_data_code': 'SA'},
+    {'slug': 'uefa.cl', 'name': 'UEFA Champions League', 'source': 'football_data', 'football_data_code': 'CL'},
+    {'slug': 'usa.1', 'name': 'MLS', 'source': 'espn', 'espn_slug': 'usa.1'},
+    {'slug': 'fifa.world', 'name': 'FIFA World Cup', 'source': 'football_data', 'football_data_code': 'WC'},
+]
+
+
+def _fixture_query_competition(competition_slug):
+    """Return base query filter for fixtures by competition. None = all; 'eng.1' includes legacy null."""
+    if not competition_slug:
+        return None
+    if competition_slug == 'eng.1':
+        return or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None))
+    return Fixture.competition_slug == competition_slug
+
+
+def _current_season_start_for_competition(comp_filter):
+    """Return the start date of the 'current' season for the given competition: the season that contains
+    the most recent fixture (max fixture_date). European leagues typically run Aug–May; we use August 1.
+    Returns None if no fixtures or no dates, so callers can skip the filter. Uses naive datetime to match
+    Fixture.fixture_date (no timezone) for DB comparison."""
+    q = db.session.query(func.max(Fixture.fixture_date)).filter(Fixture.fixture_date.isnot(None))
+    if comp_filter is not None:
+        q = q.filter(comp_filter)
+    row = q.first()
+    if not row or row[0] is None:
+        return None
+    latest = row[0]
+    if hasattr(latest, 'year') and hasattr(latest, 'month'):
+        year, month = latest.year, latest.month
+    else:
+        return None
+    if month >= 8:
+        season_start = datetime(year, 8, 1)
+    else:
+        season_start = datetime(year - 1, 8, 1)
+    return season_start
+
+
+@app.route('/api/v1/competitions', methods=['GET'])
+def get_competitions():
+    """List supported competitions (leagues) for predictions."""
+    return make_response({'competitions': SUPPORTED_COMPETITIONS}, 200)
+
+
+def _fetch_standings_data():
+    """Fetch current Premier League standings; returns (standings_list, matchweek) or (None, None) on error."""
+    if not REQUESTS_AVAILABLE:
+        return None, None
+    try:
+        resp = requests.get(STANDINGS_API_URL, headers={'Accept': 'application/json'}, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        tables = data.get('tables') or []
+        entries = tables[0].get('entries', []) if tables else []
+        matchweek = data.get('matchweek')
+        standings = []
+        for e in entries:
+            team = e.get('team') or {}
+            overall = e.get('overall') or {}
+            standings.append({
+                'position': overall.get('position'),
+                'team': team.get('name') or team.get('shortName') or '—',
+                'played': overall.get('played', 0),
+                'won': overall.get('won', 0),
+                'drawn': overall.get('drawn', 0),
+                'lost': overall.get('lost', 0),
+                'goalsFor': overall.get('goalsFor', 0),
+                'goalsAgainst': overall.get('goalsAgainst', 0),
+                'goalDifference': (overall.get('goalsFor', 0) or 0) - (overall.get('goalsAgainst', 0) or 0),
+                'points': overall.get('points', 0),
+            })
+        return standings, matchweek
+    except Exception:
+        return None, None
+
 
 @app.route('/api/v1/standings', methods=['GET'])
 def get_standings():
@@ -449,22 +547,32 @@ def get_standings():
 
 @app.route('/api/v1/fixtures/rounds', methods=['GET'])
 def get_available_rounds():
-    """Get all available game week rounds from fixtures"""
+    """Get all available game week rounds from fixtures (current season only). Optional query: ?competition=slug."""
     try:
-        # Get distinct rounds from fixtures, excluding None values
-        rounds = db.session.query(Fixture.fixture_round).distinct().filter(Fixture.fixture_round.isnot(None)).order_by(Fixture.fixture_round).all()
+        competition = request.args.get('competition') or None
+        comp_filter = _fixture_query_competition(competition)
+        season_start = _current_season_start_for_competition(comp_filter)
+        base = Fixture.query
+        if comp_filter is not None:
+            base = base.filter(comp_filter)
+        if season_start is not None:
+            base = base.filter(Fixture.fixture_date >= season_start)
+        rounds_q = db.session.query(Fixture.fixture_round).distinct().filter(Fixture.fixture_round.isnot(None))
+        if comp_filter is not None:
+            rounds_q = rounds_q.filter(comp_filter)
+        if season_start is not None:
+            rounds_q = rounds_q.filter(Fixture.fixture_date >= season_start)
+        rounds = rounds_q.order_by(Fixture.fixture_round).all()
         round_numbers = [r[0] for r in rounds]
-        
-        # Debug: Check how many fixtures have rounds vs None
-        total_fixtures = Fixture.query.count()
-        fixtures_with_rounds = Fixture.query.filter(Fixture.fixture_round.isnot(None)).count()
+        total_fixtures = base.count()
+        fixtures_with_rounds = base.filter(Fixture.fixture_round.isnot(None)).count()
         fixtures_without_rounds = total_fixtures - fixtures_with_rounds
-        
-        print(f"DEBUG get_available_rounds: Total fixtures: {total_fixtures}, With rounds: {fixtures_with_rounds}, Without rounds: {fixtures_without_rounds}")
+
+        print(f"DEBUG get_available_rounds: competition={competition!r} Total fixtures: {total_fixtures}, With rounds: {fixtures_with_rounds}, Without rounds: {fixtures_without_rounds}")
         
         # If no rounds found but fixtures exist, get a sample fixture to see what we have
         if len(round_numbers) == 0 and total_fixtures > 0:
-            sample_fixture = Fixture.query.first()
+            sample_fixture = base.first()
             if sample_fixture:
                 print(f"DEBUG: Sample fixture: round={sample_fixture.fixture_round}, home={sample_fixture.fixture_home_team}, away={sample_fixture.fixture_away_team}")
             
@@ -491,24 +599,25 @@ def get_available_rounds():
 
 @app.route('/api/v1/fixtures/next-incomplete-round', methods=['GET'])
 def get_next_incomplete_round():
-    """Return the smallest game week (round) that has at least one fixture not yet completed."""
+    """Return the smallest game week (round) in the current season with at least one fixture not yet completed. Optional: ?competition=slug."""
     try:
-        # Smallest round that has at least one fixture with is_completed = False
-        next_round_row = (
-            db.session.query(Fixture.fixture_round)
-            .filter(Fixture.is_completed == False)
-            .filter(Fixture.fixture_round.isnot(None))
-            .order_by(Fixture.fixture_round.asc())
-            .first()
-        )
+        competition = request.args.get('competition') or None
+        comp_filter = _fixture_query_competition(competition)
+        season_start = _current_season_start_for_competition(comp_filter)
+        q = db.session.query(Fixture.fixture_round).filter(Fixture.is_completed == False).filter(Fixture.fixture_round.isnot(None))
+        if comp_filter is not None:
+            q = q.filter(comp_filter)
+        if season_start is not None:
+            q = q.filter(Fixture.fixture_date >= season_start)
+        next_round_row = q.order_by(Fixture.fixture_round.asc()).first()
         if next_round_row:
             return make_response({'round': next_round_row[0]}, 200)
-        # All fixtures completed: return the latest round so user sees last week
-        max_round_row = (
-            db.session.query(db.func.max(Fixture.fixture_round))
-            .filter(Fixture.fixture_round.isnot(None))
-            .first()
-        )
+        max_q = db.session.query(db.func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
+        if comp_filter is not None:
+            max_q = max_q.filter(comp_filter)
+        if season_start is not None:
+            max_q = max_q.filter(Fixture.fixture_date >= season_start)
+        max_round_row = max_q.first()
         round_num = max_round_row[0] if max_round_row and max_round_row[0] is not None else None
         return make_response({'round': round_num}, 200)
     except Exception as e:
@@ -520,33 +629,45 @@ def get_next_incomplete_round():
 
 @app.route('/api/v1/fixtures/current-round', methods=['GET'])
 def get_current_round():
-    """Return the default game week: the lowest round that has NOT fully completed yet.
-    Same rule as before: a round is incomplete if it has any fixture that (has no scores) AND (is not completed).
-    Implemented in DB so we avoid loading all fixtures and Python boolean quirks."""
+    """Return the default game week: the lowest round that has at least one non-completed fixture
+    in the *current* season (season that contains the most recent fixture). If every round in that
+    season is complete, return the last round. Optional: ?competition=slug."""
     try:
         from sqlalchemy import distinct
-        # Incomplete = round has a fixture with (missing score) AND (is_completed false/null)
+        competition = request.args.get('competition') or None
+        comp_filter = _fixture_query_competition(competition)
+        season_start = _current_season_start_for_competition(comp_filter)
         incomplete_query = (
             db.session.query(distinct(Fixture.fixture_round))
             .filter(Fixture.fixture_round.isnot(None))
             .filter(or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None)))
             .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
         )
+        if comp_filter is not None:
+            incomplete_query = incomplete_query.filter(comp_filter)
+        if season_start is not None:
+            incomplete_query = incomplete_query.filter(Fixture.fixture_date >= season_start)
         incomplete_rows = incomplete_query.all()
         incomplete_rounds = sorted([int(r[0]) for r in incomplete_rows if r[0] is not None])
-        max_r = None
+        max_q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
+        if comp_filter is not None:
+            max_q = max_q.filter(comp_filter)
+        if season_start is not None:
+            max_q = max_q.filter(Fixture.fixture_date >= season_start)
+        max_row = max_q.first()
+        max_r = int(max_row[0]) if max_row and max_row[0] is not None else None
         if incomplete_rounds:
             round_num = incomplete_rounds[0]
         else:
-            # All rounds complete: default to next week (e.g. 27 when 26 is done)
-            max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
-            max_r = int(max_row[0]) if max_row and max_row[0] is not None else None
-            round_num = (max_r + 1) if max_r is not None else None
+            round_num = max_r
         payload = {'round': round_num}
         if request.args.get('debug'):
             max_for_debug = max_r
             if max_for_debug is None and incomplete_rounds:
-                max_row = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None)).first()
+                max_q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
+                if comp_filter is not None:
+                    max_q = max_q.filter(comp_filter)
+                max_row = max_q.first()
                 max_for_debug = int(max_row[0]) if max_row and max_row[0] is not None else None
             payload['_debug'] = {
                 'incomplete_rounds': incomplete_rounds[:15],
@@ -608,11 +729,348 @@ def repair_fixture_completed():
         return make_response({'error': str(e)}, 500)
 
 
+# ESPN does not expose matchday/week on each event. Leagues play N matches per round; we assign round by sorted date.
+# Cap events so we don't get extra "rounds" from cup/other competitions (e.g. Ligue 1 calendar can include 80+ dates).
+ESPN_MATCHES_PER_ROUND = {
+    'ger.1': 9,   # Bundesliga (e.g. matchday 24 = Feb 27–Mar 1: Augsburg–Cologne through Hamburg–RB Leipzig)
+    'esp.1': 10,  # La Liga
+    'fra.1': 10,  # Ligue 1
+    'eng.1': 10,  # EPL (if ever synced via ESPN)
+    'usa.1': 15,  # MLS (approx; varies by season)
+}
+ESPN_MAX_ROUNDS = {
+    'ger.1': 34,
+    'esp.1': 38,
+    'fra.1': 38,
+    'eng.1': 38,
+    'usa.1': 34,
+}
+
+
+def _sync_fixtures_espn(league_slug):
+    """Fetch fixtures from ESPN API for a given league (e.g. esp.1, fifa.world). Returns (added, updated, seen, error)."""
+    comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('espn_slug') == league_slug or c.get('slug') == league_slug), None)
+    competition_slug = (comp or {}).get('slug') or league_slug
+    base_url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_slug}/scoreboard"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    resp = requests.get(base_url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    info = resp.json()
+    leagues_list = info.get('leagues') or []
+    calendar = leagues_list[0].get('calendar') if leagues_list else []
+    dates_to_fetch = []
+    calendar_entries_by_date = {}  # date_str -> round number from phase (for fifa.world)
+    if isinstance(calendar, list) and calendar:
+        first = calendar[0]
+        if isinstance(first, str):
+            for s in calendar:
+                if isinstance(s, str) and 'T' in s:
+                    try:
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                        dates_to_fetch.append(dt.strftime('%Y%m%d'))
+                    except Exception:
+                        pass
+        elif isinstance(first, dict) and first.get('entries'):
+            for entry in first.get('entries', []):
+                start_val = entry.get('startDate')
+                end_val = entry.get('endDate')
+                phase_round = entry.get('value')
+                try:
+                    phase_round = int(phase_round) if phase_round is not None else None
+                except (TypeError, ValueError):
+                    phase_round = None
+                if start_val and isinstance(start_val, str):
+                    try:
+                        start_dt = datetime.fromisoformat(start_val.replace('Z', '+00:00'))
+                        end_dt = start_dt
+                        if end_val and isinstance(end_val, str):
+                            try:
+                                end_dt = datetime.fromisoformat(end_val.replace('Z', '+00:00'))
+                            except Exception:
+                                pass
+                        d = start_dt
+                        while d <= end_dt:
+                            dstr = d.strftime('%Y%m%d')
+                            dates_to_fetch.append(dstr)
+                            if phase_round is not None:
+                                calendar_entries_by_date[dstr] = phase_round
+                            d += timedelta(days=1)
+                    except Exception:
+                        pass
+    # For leagues with a fixed season length, ensure we include upcoming matchdays (e.g. Bundesliga
+    # week 24 = Feb 27–Mar 1). ESPN calendar can be short; extend through end of season.
+    _euro_season_leagues = ('ger.1', 'esp.1', 'fra.1', 'eng.1')
+    if league_slug in _euro_season_leagues:
+        now = datetime.now(timezone.utc)
+        if now.month >= 8:
+            end_year = now.year + 1
+        else:
+            end_year = now.year
+        end_season = datetime(end_year, 5, 31, tzinfo=timezone.utc)
+        d = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        while d <= end_season:
+            dates_to_fetch.append(d.strftime('%Y%m%d'))
+            d += timedelta(days=1)
+    if not dates_to_fetch:
+        dates_to_fetch = [datetime.now(timezone.utc).strftime('%Y%m%d')]
+    dates_to_fetch = sorted(set(dates_to_fetch))[:250]
+    matches_per_round = ESPN_MATCHES_PER_ROUND.get(league_slug)
+    collected = []
+    for date_str in dates_to_fetch:
+        url = f"{base_url}?dates={date_str}"
+        try:
+            r = requests.get(url, headers=headers, timeout=15)
+            r.raise_for_status()
+            day_data = r.json()
+        except Exception as e:
+            print(f"ESPN sync: skip date {date_str}: {e}")
+            continue
+        events = day_data.get('events') or []
+        for ev in events:
+            external_id = str(ev.get('id') or '')
+            comps = ev.get('competitions') or []
+            comp0 = comps[0] if comps else {}
+            competitors = comp0.get('competitors') or []
+            home_team = away_team = None
+            home_score = away_score = None
+            for c in competitors:
+                name = (c.get('team') or {}).get('displayName') or (c.get('team') or {}).get('name') or ''
+                if (c.get('homeAway') or '').lower() == 'home':
+                    home_team = name
+                    try:
+                        home_score = int(c.get('score')) if c.get('score') is not None else None
+                    except (TypeError, ValueError):
+                        home_score = None
+                else:
+                    away_team = name
+                    try:
+                        away_score = int(c.get('score')) if c.get('score') is not None else None
+                    except (TypeError, ValueError):
+                        away_score = None
+            if not home_team or not away_team:
+                continue
+            status = (comp0.get('status') or {}) if comp0 else {}
+            is_completed = status.get('type', {}).get('state') == 'post' or status.get('completed') is True
+            date_val = ev.get('date')
+            fixture_date = None
+            if date_val:
+                try:
+                    fixture_date = datetime.fromisoformat(date_val.replace('Z', '+00:00'))
+                    if fixture_date.tzinfo is None:
+                        fixture_date = fixture_date.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+            collected.append({
+                'external_id': external_id,
+                'home_team': home_team,
+                'away_team': away_team,
+                'fixture_date': fixture_date,
+                'home_score': home_score,
+                'away_score': away_score,
+                'is_completed': is_completed,
+                'date_str': date_str,
+            })
+    def _event_sort_key(x):
+        fd = x['fixture_date']
+        return (fd if fd else datetime.max.replace(tzinfo=timezone.utc), x['external_id'] or '')
+    collected.sort(key=_event_sort_key)
+    max_rounds = ESPN_MAX_ROUNDS.get(league_slug) if league_slug else None
+    if matches_per_round is not None and max_rounds is not None:
+        max_events = max_rounds * matches_per_round
+        collected = collected[:max_events]
+    fixtures_seen = len(collected)
+    if matches_per_round is not None:
+        for i, item in enumerate(collected):
+            item['fixture_round'] = (i // matches_per_round) + 1
+    else:
+        for i, item in enumerate(collected):
+            item['fixture_round'] = calendar_entries_by_date.get(item['date_str'])
+            if item['fixture_round'] is None:
+                item['fixture_round'] = i + 1
+    fixtures_added = 0
+    fixtures_updated = 0
+    for item in collected:
+        external_id = item['external_id']
+        fixture_round = item['fixture_round']
+        existing = Fixture.query.filter_by(competition_slug=competition_slug, external_id=external_id).first() if external_id else None
+        if not existing:
+            existing = Fixture.query.filter(
+                Fixture.competition_slug == competition_slug,
+                Fixture.fixture_home_team == item['home_team'],
+                Fixture.fixture_away_team == item['away_team'],
+                Fixture.fixture_date == item['fixture_date']
+            ).first() if item['fixture_date'] else None
+        if existing:
+            existing.fixture_round = fixture_round
+            if item['fixture_date']:
+                existing.fixture_date = item['fixture_date']
+            existing.actual_home_score = item['home_score']
+            existing.actual_away_score = item['away_score']
+            existing.is_completed = item['is_completed']
+            if external_id:
+                existing.external_id = external_id
+            fixtures_updated += 1
+        else:
+            new_f = Fixture(
+                competition_slug=competition_slug,
+                external_id=external_id or None,
+                fixture_round=fixture_round,
+                fixture_date=item['fixture_date'],
+                fixture_home_team=item['home_team'],
+                fixture_away_team=item['away_team'],
+                actual_home_score=item['home_score'],
+                actual_away_score=item['away_score'],
+                is_completed=item['is_completed'],
+            )
+            db.session.add(new_f)
+            fixtures_added += 1
+    return fixtures_added, fixtures_updated, fixtures_seen, None
+
+
+# football-data.org provides official matchday numbers (e.g. Bundesliga). Requires FOOTBALL_DATA_ORG_API_KEY (free at https://www.football-data.org/).
+FOOTBALL_DATA_ORG_BASE = 'https://api.football-data.org/v4'
+
+
+def _normalize_team_name_for_match(name):
+    """Normalize team name for deduplication: same match can appear as 'FC Bayern München' vs 'Bayern Munich', etc."""
+    if not name or not isinstance(name, str):
+        return ''
+    s = name.strip().lower()
+    # Umlauts -> ascii so München matches Munich
+    for char, repl in [('ü', 'ue'), ('ö', 'oe'), ('ä', 'ae'), ('ß', 'ss')]:
+        s = s.replace(char, repl)
+    # Drop common prefixes so "FC Bayern München" and "Bayern Munich" match
+    for prefix in ('fc ', 'afc ', 'ssc ', 'sc ', 'cf ', 'fk ', 'real ', 'atletico '):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+    # Place-name variants (German vs English)
+    s = s.replace('muenchen', 'munich')
+    s = s.replace('moenchengladbach', 'munchengladbach')
+    s = s.replace('&', ' and ')
+    while '  ' in s:
+        s = s.replace('  ', ' ')
+    return s.strip()
+
+
+def _sync_fixtures_football_data(competition_code, competition_slug):
+    """Fetch fixtures from football-data.org for a competition (e.g. BL1 = Bundesliga). Returns (added, updated, seen, error)."""
+    api_key = (os.getenv('FOOTBALL_DATA_ORG_API_KEY') or '').strip()
+    if not api_key:
+        return 0, 0, 0, 'FOOTBALL_DATA_ORG_API_KEY is not set. Get a free key at https://www.football-data.org/'
+    url = f'{FOOTBALL_DATA_ORG_BASE}/competitions/{competition_code}/matches'
+    headers = {'X-Auth-Token': api_key, 'User-Agent': 'FantasyPredictor/1.0'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        return 0, 0, 0, str(e)
+    matches = data.get('matches') if isinstance(data, dict) else []
+    if not isinstance(matches, list):
+        return 0, 0, 0, 'Unexpected API response: no matches list'
+    fixtures_added = 0
+    fixtures_updated = 0
+    for m in matches:
+        if not isinstance(m, dict):
+            continue
+        external_id = str(m.get('id') or '')
+        matchday = m.get('matchday')
+        if matchday is not None:
+            try:
+                fixture_round = int(matchday)
+            except (TypeError, ValueError):
+                fixture_round = None
+        else:
+            fixture_round = None
+        utc_date_str = m.get('utcDate')
+        fixture_date = None
+        if utc_date_str:
+            try:
+                fixture_date = datetime.fromisoformat(utc_date_str.replace('Z', '+00:00'))
+                if fixture_date.tzinfo is None:
+                    fixture_date = fixture_date.replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+        home_team = None
+        away_team = None
+        if isinstance(m.get('homeTeam'), dict):
+            home_team = m['homeTeam'].get('name') or m['homeTeam'].get('shortName')
+        if isinstance(m.get('awayTeam'), dict):
+            away_team = m['awayTeam'].get('name') or m['awayTeam'].get('shortName')
+        if not home_team or not away_team:
+            continue
+        score = m.get('score') or {}
+        full_time = score.get('fullTime') if isinstance(score, dict) else None
+        home_score = away_score = None
+        if isinstance(full_time, dict):
+            home_score = full_time.get('homeTeam')
+            away_score = full_time.get('awayTeam')
+            if home_score is not None:
+                try:
+                    home_score = int(home_score)
+                except (TypeError, ValueError):
+                    home_score = None
+            if away_score is not None:
+                try:
+                    away_score = int(away_score)
+                except (TypeError, ValueError):
+                    away_score = None
+        status = (m.get('status') or '').upper()
+        is_completed = status == 'FINISHED'
+        existing = Fixture.query.filter_by(competition_slug=competition_slug, external_id=external_id).first() if external_id else None
+        if not existing:
+            existing = Fixture.query.filter(
+                Fixture.competition_slug == competition_slug,
+                Fixture.fixture_home_team == home_team,
+                Fixture.fixture_away_team == away_team,
+                Fixture.fixture_round == fixture_round,
+            ).first()
+        # Match by normalized names so "FC Bayern München" vs "Bayern Munich" dedupe
+        if not existing and fixture_round is not None:
+            norm_home = _normalize_team_name_for_match(home_team)
+            norm_away = _normalize_team_name_for_match(away_team)
+            if norm_home and norm_away:
+                candidates = Fixture.query.filter(
+                    Fixture.competition_slug == competition_slug,
+                    Fixture.fixture_round == fixture_round,
+                ).all()
+                for c in candidates:
+                    if (_normalize_team_name_for_match(c.fixture_home_team) == norm_home and
+                            _normalize_team_name_for_match(c.fixture_away_team) == norm_away):
+                        existing = c
+                        break
+        if existing:
+            existing.fixture_round = fixture_round
+            if fixture_date:
+                existing.fixture_date = fixture_date
+            existing.actual_home_score = home_score
+            existing.actual_away_score = away_score
+            existing.is_completed = is_completed
+            if external_id:
+                existing.external_id = external_id
+            fixtures_updated += 1
+        else:
+            new_f = Fixture(
+                competition_slug=competition_slug,
+                external_id=external_id or None,
+                fixture_round=fixture_round,
+                fixture_date=fixture_date,
+                fixture_home_team=home_team,
+                fixture_away_team=away_team,
+                actual_home_score=home_score,
+                actual_away_score=away_score,
+                is_completed=is_completed,
+            )
+            db.session.add(new_f)
+            fixtures_added += 1
+    return fixtures_added, fixtures_updated, len(matches), None
+
+
 @app.route('/api/v1/fixtures/sync', methods=['POST'])
 def sync_fixtures():
     """
     Fetch fixtures from external API and store them in the database.
-    Expects JSON body with 'api_url' field, or uses EXTERNAL_FIXTURES_API_URL env variable.
+    Body: 'api_url' (Premier League), or source='espn' + league_slug (e.g. esp.1, fifa.world).
     """
     try:
         if not REQUESTS_AVAILABLE:
@@ -622,6 +1080,56 @@ def sync_fixtures():
         
         data = request.get_json() or {}
         api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+        source = (data.get('source') or '').strip().lower()
+        league_slug = (data.get('league_slug') or data.get('competition') or '').strip()
+        
+        if source == 'espn' and league_slug:
+            comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('espn_slug') == league_slug or c.get('slug') == league_slug), None)
+            if not comp:
+                return make_response({'error': f'Unknown ESPN league: {league_slug}. Use one of esp.1, fra.1, ger.1, usa.1, fifa.world'}, 400)
+            try:
+                added, updated, seen, err = _sync_fixtures_espn(league_slug)
+                if err:
+                    return make_response({'error': err}, 500)
+                db.session.commit()
+                return make_response({
+                    'message': 'Fixtures synced successfully (ESPN)',
+                    'source': 'espn',
+                    'league_slug': league_slug,
+                    'added': added,
+                    'updated': updated,
+                    'fixtures_seen': seen,
+                    'total_written': added + updated,
+                }, 200)
+            except Exception as e:
+                db.session.rollback()
+                import traceback
+                return make_response({'error': str(e), 'details': traceback.format_exc().split('\n')[-3:]}, 500)
+        
+        if source == 'football_data' or (league_slug and next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == league_slug and c.get('source') == 'football_data'), None)):
+            comp_slug = league_slug or (data.get('competition') or '').strip()
+            comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == comp_slug and c.get('source') == 'football_data'), None)
+            if not comp:
+                return make_response({'error': 'Bundesliga (ger.1) uses football-data.org. Set FOOTBALL_DATA_ORG_API_KEY and sync with competition=ger.1.'}, 400)
+            code = comp.get('football_data_code') or 'BL1'
+            try:
+                added, updated, seen, err = _sync_fixtures_football_data(code, comp_slug)
+                if err:
+                    return make_response({'error': err}, 500)
+                db.session.commit()
+                return make_response({
+                    'message': 'Fixtures synced successfully (football-data.org)',
+                    'source': 'football_data',
+                    'competition': comp_slug,
+                    'added': added,
+                    'updated': updated,
+                    'fixtures_seen': seen,
+                    'total_written': added + updated,
+                }, 200)
+            except Exception as e:
+                db.session.rollback()
+                import traceback
+                return make_response({'error': str(e), 'details': traceback.format_exc().split('\n')[-3:]}, 500)
         
         if not api_url:
             return make_response({'error': 'API URL is required. Provide api_url in request body or set EXTERNAL_FIXTURES_API_URL environment variable.'}, 400)
@@ -990,6 +1498,7 @@ def sync_fixtures():
             
             if existing_fixture:
                 # Update existing fixture
+                existing_fixture.competition_slug = 'eng.1'
                 if fixture_round is not None and existing_fixture.fixture_round != fixture_round:
                     existing_fixture.fixture_round = fixture_round
                 if fixture_date:
@@ -998,6 +1507,7 @@ def sync_fixtures():
             else:
                 # Create new fixture
                 new_fixture = Fixture(
+                    competition_slug='eng.1',
                     fixture_round=fixture_round,
                     fixture_date=fixture_date,
                     fixture_home_team=home_team,
@@ -1227,6 +1737,128 @@ class PredictionsResource(Resource):
             return make_response({'error': str(e)}, 500)
 
 api.add_resource(PredictionsResource, '/api/v1/predictions')
+
+
+@app.route('/api/v1/predictions/ask-ai', methods=['POST'])
+def ask_ai_prediction():
+    """
+    Get an AI-generated score prediction for a fixture. No caching; each request
+    returns a fresh prediction (e.g. to reflect latest form, injuries, etc.).
+    Requires OPENAI_API_KEY and the openai package.
+    """
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'Authentication required'}, 401)
+
+        if not OPENAI_AVAILABLE or OpenAI is None:
+            return make_response({'error': 'Ask AI is not available (openai package not installed)'}, 503)
+
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key or not api_key.strip():
+            return make_response({'error': 'Ask AI is not configured (OPENAI_API_KEY not set)'}, 503)
+
+        data = request.get_json() or {}
+        fixture_id = data.get('fixture_id')
+        league_id = data.get('league_id')
+        if not fixture_id:
+            return make_response({'error': 'Missing fixture_id'}, 400)
+        if not league_id:
+            return make_response({'error': 'Missing league_id (required to check if Ask AI is enabled for this league)'}, 400)
+
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        if not getattr(league, 'ai_predictions_enabled', False):
+            return make_response({'error': 'Ask AI is not enabled for this league'}, 403)
+
+        fixture = Fixture.query.get(fixture_id)
+        if not fixture:
+            return make_response({'error': 'Fixture not found'}, 404)
+
+        # Lock after kickoff (same as saving a prediction)
+        if fixture.fixture_date:
+            now_utc = datetime.now(timezone.utc)
+            kickoff = fixture.fixture_date
+            if getattr(kickoff, 'tzinfo', None) is None:
+                kickoff = kickoff.replace(tzinfo=timezone.utc)
+            if now_utc >= kickoff:
+                return make_response({'error': 'Cannot get AI prediction for a fixture that has already started'}, 403)
+
+        standings_list, matchweek = _fetch_standings_data()
+        standings_text = ''
+        if standings_list:
+            lines = [f"{e['position']}. {e['team']} – P{e['played']} W{e['won']} D{e['drawn']} L{e['lost']} GF{e['goalsFor']} GA{e['goalsAgainst']} GD{e['goalDifference']} Pts{e['points']}" for e in standings_list]
+            standings_text = 'Current Premier League table (after latest matchweek):\n' + '\n'.join(lines)
+        else:
+            standings_text = 'Current Premier League standings could not be loaded; base your prediction on general knowledge of the teams.'
+
+        round_info = f" (Round {fixture.fixture_round})" if fixture.fixture_round else ""
+        prompt = f"""Fixture{round_info}: {fixture.fixture_home_team} (home) vs {fixture.fixture_away_team} (away).
+
+{standings_text}
+
+Predict the full-time score. Consider table position, form, and home advantage. Reply with valid JSON only, no other text:
+{{"home_team_score": <integer 0-20>, "away_team_score": <integer 0-20>, "rationale": "<one short sentence explaining the prediction>"}}"""
+
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
+            messages=[
+                {'role': 'system', 'content': 'You are a Premier League expert. Reply only with valid JSON in the exact format requested.'},
+                {'role': 'user', 'content': prompt},
+            ],
+            response_format={'type': 'json_object'},
+            max_tokens=150,
+        )
+        content = (response.choices[0].message.content or '').strip()
+        if not content:
+            return make_response({'error': 'AI returned no prediction'}, 502)
+
+        parsed = json.loads(content)
+        home = parsed.get('home_team_score')
+        away = parsed.get('away_team_score')
+        rationale = parsed.get('rationale') or ''
+
+        try:
+            home = int(home) if home is not None else None
+            away = int(away) if away is not None else None
+        except (TypeError, ValueError):
+            home = away = None
+        if home is None or away is None or not (0 <= home <= 20 and 0 <= away <= 20):
+            return make_response({'error': 'AI returned invalid score format'}, 502)
+
+        return make_response({
+            'home_team_score': home,
+            'away_team_score': away,
+            'rationale': rationale.strip(),
+        }, 200)
+    except json.JSONDecodeError as e:
+        return make_response({'error': f'Invalid AI response: {str(e)}'}, 502)
+    except Exception as e:
+        err_str = str(e).lower()
+        err_body = getattr(e, 'body', None) or {}
+        if getattr(e, 'response', None):
+            try:
+                err_body = getattr(e.response, 'json', lambda: {})() or err_body
+            except Exception:
+                pass
+        err_inner = err_body.get('error', {}) if isinstance(err_body, dict) else {}
+        msg = str(err_inner.get('message', '') or err_inner) if isinstance(err_inner, dict) else str(err_inner)
+        code = err_inner.get('code', '') if isinstance(err_inner, dict) else ''
+        if code == 'insufficient_quota' or 'quota' in err_str or 'quota' in msg.lower():
+            return make_response({
+                'error': 'AI suggestion is unavailable: your OpenAI account has no quota. Add a payment method at platform.openai.com/account/billing to enable usage (you only pay for what you use).'
+            }, 402)
+        if getattr(e, 'status_code', None) == 429 or 'rate' in err_str or 'rate' in msg.lower():
+            return make_response({
+                'error': 'AI is rate limited. Please try again in a moment.'
+            }, 429)
+        print(f"Ask AI error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
 
 @app.route('/api/v1/fixtures/sync-scores', methods=['POST'])
 def sync_fixture_scores():
@@ -2053,6 +2685,11 @@ def create_league():
         scope = (data.get('leaderboard_scope') or data.get('scope') or 'full_season').strip().lower()
         if scope not in ('full_season', 'weekly'):
             scope = 'full_season'
+        competition_slug = (data.get('competition_slug') or data.get('competition') or 'eng.1').strip()
+        valid_slugs = [c['slug'] for c in SUPPORTED_COMPETITIONS]
+        if competition_slug not in valid_slugs:
+            competition_slug = 'eng.1'
+        ai_predictions_enabled = data.get('ai_predictions_enabled') in (True, 'true', 1, '1')
         if not league_name:
             return make_response({'error': 'League name is required'}, 400)
         if not display_name:
@@ -2066,7 +2703,7 @@ def create_league():
             if not existing:
                 break
         
-        league = League(name=league_name, invite_code=invite_code, is_open=is_open, leaderboard_scope=scope, created_by=user_id)
+        league = League(name=league_name, invite_code=invite_code, is_open=is_open, leaderboard_scope=scope, competition_slug=competition_slug, ai_predictions_enabled=ai_predictions_enabled, created_by=user_id)
         db.session.add(league)
         db.session.flush()
         
@@ -2790,6 +3427,40 @@ def run_migrations():
         print(f"Migration error: {str(e)}")
         print(f"Traceback: {error_details}")
         return make_response({'error': str(e), 'details': error_details.split('\n')[-5:]}, 500)
+
+
+# CLI: dedupe fixtures by (competition_slug, round, normalized home/away); keeps one row per match
+@app.cli.command('dedupe-fixtures')
+def dedupe_fixtures_cmd():
+    """Remove duplicate fixtures (same competition, round, normalized home/away). Keeps one per match. Run from server dir: flask dedupe-fixtures."""
+    with app.app_context():
+        fixtures = Fixture.query.all()
+        # group key: (competition_slug, fixture_round, norm_home, norm_away)
+        groups = {}
+        for f in fixtures:
+            comp = getattr(f, 'competition_slug', None) or ''
+            rnd = getattr(f, 'fixture_round', None)
+            norm_h = _normalize_team_name_for_match(getattr(f, 'fixture_home_team', None) or '')
+            norm_a = _normalize_team_name_for_match(getattr(f, 'fixture_away_team', None) or '')
+            key = (comp, rnd, norm_h, norm_a)
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(f)
+        deleted = 0
+        for key, group in groups.items():
+            if len(group) <= 1:
+                continue
+            # Keep one: prefer row with external_id, else smallest id
+            group.sort(key=lambda x: (0 if (getattr(x, 'external_id', None) or '').strip() else 1, x.id))
+            keep = group[0]
+            for dup in group[1:]:
+                db.session.delete(dup)
+                deleted += 1
+        if deleted:
+            db.session.commit()
+            print(f"Dedupe complete: removed {deleted} duplicate fixture(s).")
+        else:
+            print("No duplicate fixtures found.")
 
 
 # SPA fallback: serve React app's index.html for non-API GET requests (fixes refresh 404)

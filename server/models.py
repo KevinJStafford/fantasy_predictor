@@ -120,6 +120,10 @@ class Fixture(db.Model, SerializerMixin):
     fixture_date = db.Column(db.DateTime)
     fixture_home_team = db.Column(db.String)
     fixture_away_team = db.Column(db.String)
+    # Competition/league: e.g. eng.1 (EPL), esp.1 (La Liga), fra.1, ger.1, usa.1, fifa.world (World Cup). Null = legacy EPL.
+    competition_slug = db.Column(db.String, nullable=True, index=True)
+    # External API id (e.g. ESPN event id) for deduplication when syncing
+    external_id = db.Column(db.String, nullable=True, index=True)
     # Actual scores from completed matches
     actual_home_score = db.Column(db.Integer, nullable=True)
     actual_away_score = db.Column(db.Integer, nullable=True)
@@ -150,6 +154,10 @@ class League(db.Model, SerializerMixin):
     invite_code = db.Column(db.String, unique=True, nullable=False)
     is_open = db.Column(db.Boolean, nullable=False, default=False)  # True = anyone can find and join; False = invite only
     leaderboard_scope = db.Column(db.String, nullable=False, default='full_season')  # 'full_season' | 'weekly'
+    # Real-world competition (e.g. eng.1, esp.1, fifa.world) this league predicts; null = legacy EPL
+    competition_slug = db.Column(db.String, nullable=True)
+    # Enable "Ask AI" score suggestions for this league (can be pay-gated later)
+    ai_predictions_enabled = db.Column(db.Boolean, nullable=False, default=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -166,6 +174,8 @@ class League(db.Model, SerializerMixin):
             'invite_code': self.invite_code,
             'is_open': getattr(self, 'is_open', False),
             'leaderboard_scope': getattr(self, 'leaderboard_scope', 'full_season'),
+            'competition_slug': getattr(self, 'competition_slug', None),
+            'ai_predictions_enabled': getattr(self, 'ai_predictions_enabled', False),
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

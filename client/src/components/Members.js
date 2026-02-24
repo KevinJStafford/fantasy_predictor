@@ -47,6 +47,8 @@ function Members() {
     const [plStandings, setPlStandings] = useState(null)
     const [loadingStandings, setLoadingStandings] = useState(false)
     const [standingsError, setStandingsError] = useState(null)
+    const [competitions, setCompetitions] = useState([])
+    const [selectedCompetition, setSelectedCompetition] = useState('eng.1')
     const [displayNameDialogOpen, setDisplayNameDialogOpen] = useState(false)
     const [displayNameDraft, setDisplayNameDraft] = useState('')
     const [displayNameError, setDisplayNameError] = useState(null)
@@ -58,6 +60,11 @@ function Members() {
         (leagueDetail?.created_by != null && currentUser?.id != null && Number(leagueDetail.created_by) === Number(currentUser.id)) ||
         false
     const leagueMembers = leagueDetail?.members ?? []
+    // When viewing a league, use its competition for API calls so we don't hit eng.1 before state updates
+    const effectiveCompetition = leagueDetail?.competition_slug ?? selectedCompetition
+    const isWorldCup = effectiveCompetition === 'fifa.world'
+    const weekOrDayLabel = isWorldCup ? 'Day' : 'Game Week'
+    const weekOrDayTitle = (num) => isWorldCup ? `Day ${num}` : `Week ${num}`
 
     // Get league_id from URL query params
     useEffect(() => {
@@ -86,13 +93,31 @@ function Members() {
             .then(data => {
                 const league = (data.leagues || []).find(l => l.id === leagueId)
                 setLeagueDetail(league || null)
+                if (league?.competition_slug) {
+                    setSelectedCompetition(league.competition_slug)
+                } else if (league) {
+                    setSelectedCompetition('eng.1')
+                }
             })
             .catch(() => setLeagueDetail(null))
         fetchLeaderboard()
     }, [leagueId])
 
-    // Fetch Premier League standings (no auth) for reference when making predictions
+    // Fetch supported competitions (leagues) for predictions
     useEffect(() => {
+        fetch(apiUrl('/api/v1/competitions'))
+            .then(res => res.ok ? res.json() : { competitions: [] })
+            .then(data => setCompetitions(data.competitions || []))
+            .catch(() => setCompetitions([]))
+    }, [])
+
+    // Fetch Premier League standings (no auth) only when EPL is selected
+    useEffect(() => {
+        if (selectedCompetition !== 'eng.1') {
+            setPlStandings(null)
+            setStandingsError(null)
+            return
+        }
         setLoadingStandings(true)
         setStandingsError(null)
         fetch(apiUrl('/api/v1/standings'))
@@ -105,7 +130,7 @@ function Members() {
                 setPlStandings([])
             })
             .finally(() => setLoadingStandings(false))
-    }, [])
+    }, [selectedCompetition])
 
     // On league page load: refresh results (check-results) for everyone; admins also trigger sync-scores in background
     const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
@@ -141,7 +166,8 @@ function Members() {
     }, [leagueId, isAdmin])
 
     function getAvailableRounds() {
-        fetch(apiUrl('/api/v1/fixtures/rounds'))
+        const q = effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : ''
+        fetch(apiUrl('/api/v1/fixtures/rounds') + q)
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to fetch rounds')
@@ -163,7 +189,8 @@ function Members() {
     /** Load the default game week: the lowest week that has not fully completed yet (week 1
      *  before GW1, then week 2 after GW1, etc.). */
     function loadCurrentRoundAndFixtures() {
-        fetch(apiUrl('/api/v1/fixtures/current-round') + '?t=' + Date.now(), { cache: 'no-store' })
+        const compQ = effectiveCompetition ? `&competition=${encodeURIComponent(effectiveCompetition)}` : ''
+        fetch(apiUrl('/api/v1/fixtures/current-round') + '?t=' + Date.now() + compQ, { cache: 'no-store' })
         .then(response => response.ok ? response.json() : { round: null })
         .then(data => {
             const round = data.round != null ? String(data.round) : ''
@@ -182,7 +209,8 @@ function Members() {
 
     function getFixtures(roundNumber = null) {
         setLoadingFixtures(true)
-        const url = roundNumber ? apiUrl(`/api/v1/fixtures/${roundNumber}`) : apiUrl('/api/v1/fixtures')
+        const base = roundNumber ? apiUrl(`/api/v1/fixtures/${roundNumber}`) : apiUrl('/api/v1/fixtures')
+        const url = base + (effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : '')
         fetch(url)
         .then(response => {
             if (!response.ok) {
@@ -191,7 +219,6 @@ function Members() {
             return response.json()
         })
         .then(fixturesData => {
-            console.log('Fixtures fetched:', fixturesData)
             const fixturesList = Array.isArray(fixturesData) ? fixturesData : []
             const sorted = [...fixturesList].sort((a, b) => {
                 const ad = a?.fixture_date ? new Date(a.fixture_date).getTime() : Number.POSITIVE_INFINITY
@@ -212,15 +239,23 @@ function Members() {
     function syncFixtures() {
         setSyncing(true)
         setSyncMessage(null)
-        
+        const comp = competitions.find(c => c.slug === effectiveCompetition)
+        const isFootballData = comp && comp.source === 'football_data'
+        const isEspn = comp && comp.source === 'espn'
+        let body
+        if (isFootballData) {
+            body = { source: 'football_data', league_slug: comp.slug, competition: comp.slug }
+        } else if (isEspn) {
+            body = { source: 'espn', league_slug: comp.espn_slug || comp.slug }
+        } else {
+            body = { api_url: (comp && comp.api_url) || 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100' }
+        }
         fetch(apiUrl('/api/v1/fixtures/sync'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                api_url: 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
-            })
+            body: JSON.stringify(body)
         })
         .then(async response => {
             const contentType = response.headers.get('content-type')
@@ -240,7 +275,9 @@ function Members() {
                 setSyncMessage({ type: 'error', text: data.error })
             } else {
                 const details = [
-                    `added=${data.added ?? 0}, updated=${data.updated ?? 0}`,
+                    data.added != null ? `added=${data.added}` : null,
+                    data.updated != null ? `updated=${data.updated}` : null,
+                    data.total_written != null ? `total=${data.total_written}` : null,
                     data.window_start_utc && data.window_end_utc ? `window=${data.window_start_utc} → ${data.window_end_utc}` : null,
                     data.fixtures_seen != null ? `seen=${data.fixtures_seen}` : null,
                     data.fixtures_with_parsed_date != null ? `parsed_dates=${data.fixtures_with_parsed_date}` : null,
@@ -251,15 +288,12 @@ function Members() {
                     data.parsed_max_date_utc ? `api_max=${data.parsed_max_date_utc}` : null,
                 ].filter(Boolean).join(' | ')
 
-                setSyncMessage({ 
-                    type: 'success', 
-                    text: `Sync complete. ${details}` 
+                setSyncMessage({
+                    type: 'success',
+                    text: `Sync complete. ${details}`
                 })
-                // Refresh available rounds and fixtures after sync
                 getAvailableRounds()
-                if (gameWeek && gameWeek !== '') {
-                    getFixtures(parseInt(gameWeek))
-                }
+                loadCurrentRoundAndFixtures()
             }
         })
         .catch(error => {
@@ -511,15 +545,24 @@ function Members() {
         getPredictions()
     }, [])
 
-    // When league page loads, show the current match week (most recent week with games in the future)
+    // When not viewing a league, load current round once on mount (league view uses effect below)
     useEffect(() => {
-        loadCurrentRoundAndFixtures()
+        if (!leagueId) loadCurrentRoundAndFixtures()
     }, [])
 
-    // When league is selected, refresh default game week (in case current-round changed)
+    // When league is selected, refresh default game week after league detail (and thus competition_slug) is loaded
     useEffect(() => {
-        if (leagueId) loadCurrentRoundAndFixtures()
-    }, [leagueId])
+        if (leagueId && leagueDetail?.id === leagueId) {
+            loadCurrentRoundAndFixtures()
+            getAvailableRounds()
+        }
+    }, [leagueId, leagueDetail])
+
+    // When competition (league) changes, refresh rounds and current week/fixtures
+    useEffect(() => {
+        getAvailableRounds()
+        loadCurrentRoundAndFixtures()
+    }, [selectedCompetition])
 
     const handleDropdownChange = (e) => {
         const selectedValue = e.target.value;
@@ -588,20 +631,40 @@ function Members() {
             </Alert>
         )}
         
-        <Box sx={{ mb: 2 }}>
-            <Typography variant="h6" component="label" sx={{ mr: 2 }}>
-                Select Game Week:
-            </Typography>
-            <select 
-                value={gameWeek} 
-                onChange={handleDropdownChange}
-                style={{ padding: '8px', fontSize: '16px', minWidth: '150px' }}
-            >
-                <option value="">-- Select a Week --</option>
-                {availableRounds.map(round => (
-                    <option key={round} value={round}>Week {round}</option>
-                ))}
-            </select>
+        <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h6" component="label">League:</Typography>
+                {leagueDetail?.competition_slug ? (
+                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {competitions.find(c => c.slug === leagueDetail.competition_slug)?.name || leagueDetail.competition_slug}
+                    </Typography>
+                ) : (
+                    <select
+                        value={selectedCompetition}
+                        onChange={(e) => setSelectedCompetition(e.target.value)}
+                        style={{ padding: '8px', fontSize: '16px', minWidth: '180px' }}
+                    >
+                        {competitions.length ? competitions.map(c => (
+                            <option key={c.slug} value={c.slug}>{c.name}</option>
+                        )) : (
+                            <option value="eng.1">English Premier League</option>
+                        )}
+                    </select>
+                )}
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="h6" component="label">{weekOrDayLabel}:</Typography>
+                <select
+                    value={gameWeek}
+                    onChange={handleDropdownChange}
+                    style={{ padding: '8px', fontSize: '16px', minWidth: '150px' }}
+                >
+                    <option value="">-- Select {isWorldCup ? 'Day' : 'Week'} --</option>
+                    {availableRounds.map(round => (
+                        <option key={round} value={round}>{weekOrDayTitle(round)}</option>
+                    ))}
+                </select>
+            </Box>
         </Box>
 
         {!leagueId && (
@@ -621,7 +684,7 @@ function Members() {
                 {gameWeek ? (
                     <>
                         <Typography variant="h5" component="h2" sx={{ mb: 2, textAlign: 'center', fontWeight: 600 }}>
-                            Game Week #{gameWeek}
+                            {weekOrDayTitle(gameWeek)}
                         </Typography>
 
                         {loadingFixtures ? (
@@ -658,6 +721,8 @@ function Members() {
                                                         if (leagueId) fetchLeaderboard()
                                                     }}
                                                     asTableRow
+                                                    allowAskAi={leagueDetail?.ai_predictions_enabled === true}
+                                                    leagueId={leagueId}
                                                 />
                                             )
                                         })}
@@ -666,7 +731,7 @@ function Members() {
                             </TableContainer>
                         ) : (
                             <Typography variant="body1" sx={{ mt: 2 }}>
-                                No fixtures found for week {gameWeek}. Please sync fixtures first.
+                                No fixtures found for {isWorldCup ? 'day' : 'week'} {gameWeek}. Please sync fixtures first.
                             </Typography>
                         )}
 
@@ -674,7 +739,7 @@ function Members() {
                         {gameWeek && (
                             <Box sx={{ mt: 3, display: { xs: 'none', md: 'block' } }}>
                                 <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-                                    Results - Week {gameWeek}
+                                    Results - {weekOrDayTitle(gameWeek)}
                                 </Typography>
                                 {loadingPredictions ? (
                                     <Typography variant="body2">Loading results...</Typography>
@@ -694,7 +759,7 @@ function Members() {
                                     if (completedPredictions.length === 0) {
                                         return (
                                             <Typography variant="body2" sx={{ mt: 2 }}>
-                                                No completed predictions for this week yet.
+                                                No completed predictions for this {isWorldCup ? 'day' : 'week'} yet.
                                             </Typography>
                                         )
                                     }
@@ -719,7 +784,7 @@ function Members() {
                                                         <Card key={prediction.id} sx={{ mb: 1.5 }}>
                                                             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                                                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                                                    <Typography variant="subtitle2">Week {fixture?.round || 'N/A'}</Typography>
+                                                                    <Typography variant="subtitle2">{fixture?.round ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
                                                                     <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
                                                                 </Box>
                                                                 <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
@@ -742,14 +807,14 @@ function Members() {
                     </>
                 ) : (
                     <Typography variant="body1" sx={{ mt: 2 }}>
-                        Please select a game week to view and make predictions for fixtures.
+                        Please select a {isWorldCup ? 'day' : 'game week'} to view and make predictions for fixtures.
                     </Typography>
                 )}
             </Grid>
 
-            {/* Right side: Premier League table + Leaderboard (Results shown below predictions on desktop) */}
+            {/* Right side: Premier League table (when EPL selected) + Leaderboard */}
             <Grid item xs={12} md={5} sx={{ pl: { md: 2 }, pr: { xs: 2, md: 4 } }}>
-                {/* Premier League table (real standings for reference) - no horizontal padding so table aligns with prediction table */}
+                {selectedCompetition === 'eng.1' && (
                 <Card variant="outlined" sx={{ mb: 2 }}>
                     <CardContent sx={{ px: 0, '&:last-child': { pb: 2 }, pt: 2, pb: 0 }}>
                         <Typography variant="h6" component="h3" sx={{ mb: 1.5, fontWeight: 600, px: 2 }}>
@@ -799,6 +864,7 @@ function Members() {
                         )}
                     </CardContent>
                 </Card>
+                )}
                 <Box sx={{ position: 'sticky', top: 20 }}>
                     {/* Your display name in this league */}
                     {leagueId && myMembership && (
@@ -825,14 +891,14 @@ function Members() {
                             League Leaderboard
                             {leaderboardScope === 'weekly' && leaderboardCurrentRound != null && (
                                 <Typography component="span" variant="body1" color="text.secondary" sx={{ ml: 1, fontWeight: 'normal' }}>
-                                    (Week {leaderboardCurrentRound})
+                                    ({weekOrDayTitle(leaderboardCurrentRound)})
                                 </Typography>
                             )}
                         </Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                             {leaderboardScope === 'weekly'
-                                ? 'Points this week. "Weeks won" = number of weeks you placed first (including ties).'
-                                : 'All game weeks (1-38)'}
+                                ? (isWorldCup ? 'Points this day. "Days won" = number of days you placed first (including ties).' : 'Points this week. "Weeks won" = number of weeks you placed first (including ties).')
+                                : (isWorldCup ? 'All days' : 'All game weeks (1-38)')}
                         </Typography>
                         {loadingLeaderboard ? (
                             <Typography variant="body2">Loading leaderboard...</Typography>
@@ -848,7 +914,7 @@ function Members() {
                                             <TableCell align="right"><strong>D</strong></TableCell>
                                             <TableCell align="right"><strong>L</strong></TableCell>
                                             {leaderboardScope === 'weekly' && (
-                                                <TableCell align="right"><strong>Weeks won</strong></TableCell>
+                                                <TableCell align="right"><strong>{isWorldCup ? 'Days won' : 'Weeks won'}</strong></TableCell>
                                             )}
                                         </TableRow>
                                     </TableHead>
@@ -969,7 +1035,7 @@ function Members() {
                                     >
                                         <MenuItem value="">—</MenuItem>
                                         {availableRounds.map((r) => (
-                                            <MenuItem key={r} value={String(r)}>Week {r}</MenuItem>
+                                            <MenuItem key={r} value={String(r)}>{weekOrDayTitle(r)}</MenuItem>
                                         ))}
                                     </Select>
                                 </FormControl>
@@ -1038,9 +1104,9 @@ function Members() {
                             ) : adminSelectedMemberId && adminPredictionRound && !loadingAdminFixtures && adminFixturesForRound.length === 0 ? (
                                 <Typography variant="body2" color="text.secondary">No fixtures for this week.</Typography>
                             ) : adminSelectedMemberId && !adminPredictionRound ? (
-                                <Typography variant="body2" color="text.secondary">Select a game week to view or add predictions.</Typography>
+                                <Typography variant="body2" color="text.secondary">Select a {isWorldCup ? 'day' : 'game week'} to view or add predictions.</Typography>
                             ) : adminSelectedMemberId ? (
-                                <Typography variant="body2" color="text.secondary">Select a member and game week to edit or add missed picks.</Typography>
+                                <Typography variant="body2" color="text.secondary">Select a member and {isWorldCup ? 'day' : 'game week'} to edit or add missed picks.</Typography>
                             ) : null}
                         </Box>
                     )}
@@ -1049,7 +1115,7 @@ function Members() {
                     {gameWeek && (
                         <Box sx={{ mt: 3, display: { xs: 'block', md: 'none' } }}>
                             <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-                                Results - Week {gameWeek}
+                                Results - {weekOrDayTitle(gameWeek)}
                             </Typography>
 
                             {loadingPredictions ? (
@@ -1071,7 +1137,7 @@ function Members() {
                                 if (completedPredictions.length === 0) {
                                     return (
                                         <Typography variant="body2" sx={{ mt: 2 }}>
-                                            No completed predictions for this week yet.
+                                            No completed predictions for this {isWorldCup ? 'day' : 'week'} yet.
                                         </Typography>
                                     )
                                 }
@@ -1098,7 +1164,7 @@ function Members() {
                                                     <Card key={prediction.id} sx={{ mb: 1.5 }}>
                                                         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                                                <Typography variant="subtitle2">Week {fixture?.round || 'N/A'}</Typography>
+                                                                <Typography variant="subtitle2">{fixture?.round ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
                                                                 <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
                                                             </Box>
                                                             <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>

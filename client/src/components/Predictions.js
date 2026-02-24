@@ -30,10 +30,11 @@ const parseUtcDate = (value) => {
     return Number.isNaN(d.getTime()) ? null : d
 }
 
-function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRow }) {
+function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRow, allowAskAi = false, leagueId = null }) {
     const {fixture_round, fixture_date, fixture_home_team, fixture_away_team, id} = fixture
     const [message, setMessage] = useState(null)
     const [saving, setSaving] = useState(false)
+    const [askingAi, setAskingAi] = useState(false)
     
     // Check if the game has started (lock predictions after kickoff time)
     const isGameStarted = () => {
@@ -44,6 +45,42 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
     }
     
     const gameStarted = isGameStarted()
+
+    const handleAskAi = () => {
+        if (gameStarted) return
+        setAskingAi(true)
+        setMessage(null)
+        authenticatedFetch('/api/v1/predictions/ask-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fixture_id: id, league_id: leagueId }),
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    return response.json().then((err) => {
+                        throw new Error(err.error || 'Failed to get AI prediction')
+                    })
+                }
+                return response.json()
+            })
+            .then((data) => {
+                formik.setFieldValue('home_team_score', data.home_team_score)
+                formik.setFieldValue('away_team_score', data.away_team_score)
+                formik.setFieldTouched('home_team_score', true)
+                formik.setFieldTouched('away_team_score', true)
+                if (data.rationale) {
+                    setMessage({ type: 'info', text: data.rationale })
+                    setTimeout(() => setMessage(null), 8000)
+                } else {
+                    setMessage({ type: 'success', text: 'AI suggestion applied. Edit if you like and save.' })
+                    setTimeout(() => setMessage(null), 4000)
+                }
+            })
+            .catch((error) => {
+                setMessage({ type: 'error', text: error.message || 'Could not get AI prediction.' })
+            })
+            .finally(() => setAskingAi(false))
+    }
 
     const predictionSchema = yup.object().shape({
         home_team_score: yup.number()
@@ -148,15 +185,21 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
         }).format(date)
     }
 
-    // Day/Time for table: "Saturday 10:00am"
+    // Day/Time for table: include date so you can compare to real-life league schedule (e.g. "Sat, Feb 23, 2026 · 10:00 AM")
     const formatDayTime = (value) => {
         const date = parseUtcDate(value)
         if (!date) return '—'
-        return new Intl.DateTimeFormat(undefined, {
-            weekday: 'long',
+        const datePart = new Intl.DateTimeFormat(undefined, {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        }).format(date)
+        const timePart = new Intl.DateTimeFormat(undefined, {
             hour: 'numeric',
             minute: '2-digit',
         }).format(date)
+        return `${datePart} · ${timePart}`
     }
 
     // Table row layout: Home | Score | Away | Score | Day/Time | Status (auto-save when both scores valid)
@@ -200,8 +243,24 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                     />
                 </TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
-                <TableCell align="center" sx={{ width: 80, fontSize: '0.875rem', color: 'text.secondary' }}>
-                    {rowStatus}
+                <TableCell align="center" sx={{ width: 140, fontSize: '0.875rem', color: 'text.secondary' }}>
+                    {!gameStarted && allowAskAi && (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={handleAskAi}
+                            disabled={askingAi}
+                            sx={{ mb: 0.5 }}
+                        >
+                            {askingAi ? '…' : 'Ask AI'}
+                        </Button>
+                    )}
+                    <div>{askingAi ? 'Getting suggestion…' : rowStatus}</div>
+                    {message && (
+                        <Typography variant="caption" display="block" sx={{ mt: 0.5, maxWidth: 200, textAlign: 'left' }}>
+                            {message.text}
+                        </Typography>
+                    )}
                 </TableCell>
             </TableRow>
         )
@@ -275,6 +334,19 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                             >
                                 {saveButtonLabel}
                             </Button>
+                            {!gameStarted && allowAskAi && (
+                                <Button
+                                    fullWidth
+                                    type="button"
+                                    variant="outlined"
+                                    color="secondary"
+                                    onClick={handleAskAi}
+                                    disabled={askingAi}
+                                    sx={{ mt: 1 }}
+                                >
+                                    {askingAi ? 'Getting AI suggestion…' : 'Ask AI'}
+                                </Button>
+                            )}
                         </Grid>
                     </Grid>
                     <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
