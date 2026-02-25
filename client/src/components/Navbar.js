@@ -30,7 +30,7 @@ function Navbar() {
 
     useEffect(() => {
         fetchUser();
-    }, [fetchUser]);
+    }, [fetchUser, isLoggedIn]);
 
     useEffect(() => {
         const onUserUpdated = () => fetchUser();
@@ -113,7 +113,8 @@ function Navbar() {
                         sx={{ p: 0 }}
                     >
                         <Avatar
-                            src={user?.avatar_url ? apiUrl(user.avatar_url) : undefined}
+                            key={user?.avatar_url ? `avatar-${user.id}-${user.avatar_url}` : 'avatar-placeholder'}
+                            src={user?.avatar_url ? `${apiUrl(user.avatar_url)}${user.updated_at ? `?v=${user.updated_at}` : ''}` : undefined}
                             sx={{
                                 width: { xs: 36, sm: 40 },
                                 height: { xs: 36, sm: 40 },

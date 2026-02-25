@@ -175,7 +175,8 @@ function Profile() {
                     {/* Profile image */}
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
                         <Avatar
-                            src={user?.avatar_url ? apiUrl(user.avatar_url) : undefined}
+                            key={user?.avatar_url ? `profile-avatar-${user.id}-${user.avatar_url}` : 'profile-avatar-placeholder'}
+                            src={user?.avatar_url ? `${apiUrl(user.avatar_url)}${user.updated_at ? `?v=${user.updated_at}` : ''}` : undefined}
                             sx={{ width: 96, height: 96, bgcolor: 'primary.main', mb: 1 }}
                         />
                         <input
