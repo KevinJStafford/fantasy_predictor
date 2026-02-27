@@ -546,7 +546,8 @@ function Members() {
             return
         }
         setLoadingAdminFixtures(true)
-        fetch(apiUrl(`/api/v1/fixtures/${roundNum}`))
+        const url = apiUrl(`/api/v1/fixtures/${roundNum}`) + (effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : '')
+        fetch(url)
             .then(res => res.ok ? res.json() : [])
             .then(data => {
                 const list = Array.isArray(data) ? data : []
