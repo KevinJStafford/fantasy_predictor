@@ -1,8 +1,9 @@
 import * as React from 'react'
 import Navbar from './Navbar'
 import {useEffect, useState, useCallback} from 'react'
-import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, FormControlLabel, Radio, RadioGroup, Checkbox, Link } from '@mui/material'
-import { useHistory, Link as RouterLink } from 'react-router-dom'
+import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, FormControlLabel, Radio, RadioGroup, Checkbox, Link, IconButton, Snackbar } from '@mui/material'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import { useHistory, useLocation, Link as RouterLink } from 'react-router-dom'
 import { authenticatedFetch } from '../utils/api'
 
 function Leagues() {
@@ -29,11 +30,26 @@ function Leagues() {
     const [joinOpenLeagueId, setJoinOpenLeagueId] = useState(null)
     const [joinOpenDisplayName, setJoinOpenDisplayName] = useState('')
     const [joinOpenError, setJoinOpenError] = useState(null)
+    const [copySnackbarOpen, setCopySnackbarOpen] = useState(false)
     const history = useHistory()
+    const location = useLocation()
 
     useEffect(() => {
         fetchLeagues()
     }, [])
+
+    // When visiting /leagues?join=CODE (e.g. from share link /join/CODE), open join dialog with code pre-filled
+    useEffect(() => {
+        const params = new URLSearchParams(location.search)
+        const joinCode = params.get('join')
+        if (joinCode && joinCode.trim()) {
+            setInviteCode(joinCode.trim().toUpperCase())
+            setJoinDisplayName('')
+            setJoinError(null)
+            setJoinDialogOpen(true)
+            history.replace('/leagues')
+        }
+    }, [location.search, history])
 
     function fetchCurrentUser() {
         authenticatedFetch('/api/v1/authorized')
@@ -79,6 +95,15 @@ function Leagues() {
 
     function handleLeagueClick(leagueId) {
         history.push(`/player?league=${leagueId}`)
+    }
+
+    function getShareLink(inviteCode) {
+        return `${window.location.origin}/join/${encodeURIComponent(inviteCode)}`
+    }
+
+    function handleCopyShareLink(league) {
+        const url = getShareLink(league.invite_code)
+        navigator.clipboard.writeText(url).then(() => setCopySnackbarOpen(true)).catch(() => {})
     }
 
     function handleJoinLeague() {
@@ -284,9 +309,22 @@ function Leagues() {
                                             {league.members?.length || 0} members
                                         </Typography>
                                         {league.invite_code && (
-                                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                                                Code: {league.invite_code}
-                                            </Typography>
+                                            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Code: {league.invite_code}
+                                                </Typography>
+                                                <IconButton
+                                                    size="small"
+                                                    aria-label="Copy share link"
+                                                    onClick={(e) => { e.stopPropagation(); handleCopyShareLink(league); }}
+                                                    sx={{ p: 0.25 }}
+                                                >
+                                                    <ContentCopyIcon fontSize="small" />
+                                                </IconButton>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Copy link
+                                                </Typography>
+                                            </Box>
                                         )}
                                     </CardContent>
                                 </Card>
@@ -493,6 +531,14 @@ function Leagues() {
                         <Button onClick={handleJoinSubmit} variant="contained" color="primary">Join</Button>
                     </DialogActions>
                 </Dialog>
+
+                <Snackbar
+                    open={copySnackbarOpen}
+                    autoHideDuration={3000}
+                    onClose={() => setCopySnackbarOpen(false)}
+                    message="Share link copied to clipboard"
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                />
             </Container>
         </>
     )

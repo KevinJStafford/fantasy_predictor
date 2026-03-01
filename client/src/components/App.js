@@ -34,6 +34,7 @@ function App() {
         <Route exact path="/reset-password">
           <ResetPassword />
         </Route>
+        <Route exact path="/join/:inviteCode" render={({ match }) => <Redirect to={`/leagues?join=${encodeURIComponent(match.params.inviteCode)}`} />} />
         <Route exact path="/leagues">
           <Leagues />
         </Route>
