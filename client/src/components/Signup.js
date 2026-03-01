@@ -3,14 +3,23 @@ import { TextField, Button, Container, Box, InputAdornment, IconButton } from '@
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
-import {useHistory} from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { saveToken } from '../utils/auth';
 
 import Navbar from './Navbar'
 
+function getNextRedirect(location) {
+    const params = new URLSearchParams(location.search);
+    const next = params.get('next');
+    if (next && next.startsWith('/')) return next;
+    return '/leagues';
+}
+
 function Signup({setUser}) {
     const history = useHistory();
+    const location = useLocation();
+    const redirectTo = getNextRedirect(location);
     const [showPassword, setShowPassword] = useState(false);
 
     const signupSchema = yup.object().shape({
@@ -50,7 +59,7 @@ function Signup({setUser}) {
                         }
                         setUser(user)
                         window.dispatchEvent(new Event('user-updated'))
-                        history.push('/leagues')
+                        history.push(redirectTo)
                     })
                 } else {
                     resp.json().then((data) => {

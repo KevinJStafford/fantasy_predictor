@@ -2,16 +2,25 @@ import { useEffect } from 'react';
 import {TextField, Button, Container, Box} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
-import { useHistory, Link } from 'react-router-dom';
+import { useHistory, useLocation, Link } from 'react-router-dom';
 import { apiUrl, authenticatedFetch } from '../utils/api';
 import { saveToken, getToken, removeToken } from '../utils/auth';
 
 import Navbar from './Navbar'
 
+function getNextRedirect(location) {
+    const params = new URLSearchParams(location.search);
+    const next = params.get('next');
+    if (next && next.startsWith('/')) return next;
+    return '/leagues';
+}
+
 function Login({setUser}) {
     const history = useHistory();
+    const location = useLocation();
+    const redirectTo = getNextRedirect(location);
 
-    // If user already has a valid token, log them in and redirect to leagues
+    // If user already has a valid token, log them in and redirect
     useEffect(() => {
         if (!getToken()) return;
         authenticatedFetch('/api/v1/authorized')
@@ -20,13 +29,13 @@ function Login({setUser}) {
                     return resp.json().then((user) => {
                         setUser(user);
                         window.dispatchEvent(new Event('user-updated'));
-                        history.push('/leagues');
+                        history.push(redirectTo);
                     });
                 }
                 removeToken();
             })
             .catch(() => { removeToken(); });
-    }, [history, setUser]);
+    }, [history, setUser, redirectTo]);
     const loginSchema = yup.object().shape({
         email: yup.string().email('Invalid email').required('Email is required'),
         password: yup.string().required('Password is required'),
@@ -53,7 +62,7 @@ function Login({setUser}) {
                         }
                         setUser(user)
                         window.dispatchEvent(new Event('user-updated'))
-                        history.push('/leagues')
+                        history.push(redirectTo)
                     })
                 } else {
                     resp.json().then((data) => {

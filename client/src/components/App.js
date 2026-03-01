@@ -7,6 +7,7 @@ import LandingGrid from "./LandingGrid";
 import Login from "./Login";
 import ForgotPassword from "./ForgotPassword";
 import ResetPassword from "./ResetPassword";
+import JoinLeagueLanding from "./JoinLeagueLanding";
 import Members from "./Members";
 import Leagues from "./Leagues";
 import Profile from "./Profile";
@@ -34,7 +35,9 @@ function App() {
         <Route exact path="/reset-password">
           <ResetPassword />
         </Route>
-        <Route exact path="/join/:inviteCode" render={({ match }) => <Redirect to={`/leagues?join=${encodeURIComponent(match.params.inviteCode)}`} />} />
+        <Route exact path="/join/:inviteCode">
+          <JoinLeagueLanding />
+        </Route>
         <Route exact path="/leagues">
           <Leagues />
         </Route>

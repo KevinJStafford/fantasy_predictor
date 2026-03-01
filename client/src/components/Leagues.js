@@ -1,7 +1,7 @@
 import * as React from 'react'
 import Navbar from './Navbar'
 import {useEffect, useState, useCallback} from 'react'
-import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, FormControlLabel, Radio, RadioGroup, Checkbox, Link, IconButton, Snackbar } from '@mui/material'
+import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dialog, DialogTitle, DialogContent, DialogActions, TextField, FormControl, FormControlLabel, Radio, RadioGroup, Checkbox, Link, Snackbar } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useHistory, useLocation, Link as RouterLink } from 'react-router-dom'
 import { authenticatedFetch } from '../utils/api'
@@ -309,21 +309,27 @@ function Leagues() {
                                             {league.members?.length || 0} members
                                         </Typography>
                                         {league.invite_code && (
-                                            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-                                                <Typography variant="caption" color="text.secondary">
+                                            <Box
+                                                sx={{ mt: 1, cursor: 'pointer' }}
+                                                onClick={(e) => { e.stopPropagation(); handleCopyShareLink(league); }}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-label="Copy share link"
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleCopyShareLink(league); } }}
+                                            >
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                                                     Code: {league.invite_code}
                                                 </Typography>
-                                                <IconButton
+                                                <Button
                                                     size="small"
-                                                    aria-label="Copy share link"
-                                                    onClick={(e) => { e.stopPropagation(); handleCopyShareLink(league); }}
-                                                    sx={{ p: 0.25 }}
+                                                    variant="outlined"
+                                                    startIcon={<ContentCopyIcon />}
+                                                    component="span"
+                                                    sx={{ textTransform: 'none', pointerEvents: 'none' }}
                                                 >
-                                                    <ContentCopyIcon fontSize="small" />
-                                                </IconButton>
-                                                <Typography variant="caption" color="text.secondary">
-                                                    Copy link
-                                                </Typography>
+                                                    Copy share link
+                                                </Button>
                                             </Box>
                                         )}
                                     </CardContent>
