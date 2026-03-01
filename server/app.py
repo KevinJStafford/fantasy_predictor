@@ -1800,6 +1800,7 @@ class PredictionsResource(Resource):
                     prediction_data['fixture'] = {
                         'id': fixture.id,
                         'round': display_round,
+                        'competition_slug': getattr(fixture, 'competition_slug', None),
                         'date': fixture.fixture_date.isoformat() if fixture.fixture_date else None,
                         'is_completed': fixture.is_completed,
                         'actual_home_score': fixture.actual_home_score,

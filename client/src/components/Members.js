@@ -766,12 +766,22 @@ function Members() {
                                 {loadingPredictions ? (
                                     <Typography variant="body2">Loading results...</Typography>
                                 ) : (() => {
-                                    const selectedRound = parseInt(gameWeek)
+                                    const selectedRound = parseInt(gameWeek, 10)
+                                    const roundMatch = (p) => {
+                                        const r = p.fixture.round ?? p.fixture.fixture_round
+                                        return r != null && Number(r) === selectedRound
+                                    }
+                                    const competitionMatch = (p) => {
+                                        if (!effectiveCompetition) return true
+                                        const slug = p.fixture.competition_slug
+                                        if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
+                                        return slug === effectiveCompetition
+                                    }
                                     const completedPredictions = predictions
                                         .filter(p => {
                                             if (!p.fixture) return false
                                             if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
-                                            return (p.fixture.round === selectedRound)
+                                            return roundMatch(p) && competitionMatch(p)
                                         })
                                         .sort((a, b) => {
                                             const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
@@ -1143,12 +1153,22 @@ function Members() {
                             {loadingPredictions ? (
                                 <Typography variant="body2">Loading results...</Typography>
                             ) : (() => {
-                                const selectedRound = parseInt(gameWeek)
+                                const selectedRound = parseInt(gameWeek, 10)
+                                const roundMatch = (p) => {
+                                    const r = p.fixture.round ?? p.fixture.fixture_round
+                                    return r != null && Number(r) === selectedRound
+                                }
+                                const competitionMatch = (p) => {
+                                    if (!effectiveCompetition) return true
+                                    const slug = p.fixture.competition_slug
+                                    if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
+                                    return slug === effectiveCompetition
+                                }
                                 const completedPredictions = predictions
                                     .filter(p => {
                                         if (!p.fixture) return false
                                         if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
-                                        return (p.fixture.round === selectedRound)
+                                        return roundMatch(p) && competitionMatch(p)
                                     })
                                     .sort((a, b) => {
                                         const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
