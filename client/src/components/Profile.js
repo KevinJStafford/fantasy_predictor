@@ -11,6 +11,12 @@ import {
     Avatar,
     Paper,
     Divider,
+    Switch,
+    FormControlLabel,
+    List,
+    ListItem,
+    ListItemText,
+    CircularProgress,
 } from '@mui/material'
 import { useHistory } from 'react-router-dom'
 import { authenticatedFetch, apiUrl } from '../utils/api'
@@ -32,6 +38,10 @@ function Profile() {
     const [avatarUploading, setAvatarUploading] = useState(false)
     const [avatarError, setAvatarError] = useState(null)
     const avatarInputRef = useRef(null)
+    const [leagues, setLeagues] = useState([])
+    const [leaguesLoading, setLeaguesLoading] = useState(false)
+    const [leaguesError, setLeaguesError] = useState(null)
+    const [savingNotifyLeagueIds, setSavingNotifyLeagueIds] = useState(() => new Set())
 
     useEffect(() => {
         if (!getToken()) {
@@ -50,6 +60,73 @@ function Profile() {
             .catch(() => setUser(null))
             .finally(() => setLoading(false))
     }, [history])
+
+    useEffect(() => {
+        if (!user?.id) return
+        setLeaguesLoading(true)
+        setLeaguesError(null)
+        authenticatedFetch('/api/v1/leagues')
+            .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data.error || 'Failed to load leagues')
+                setLeagues(data.leagues || [])
+            })
+            .catch((e) => setLeaguesError(e.message || 'Failed to load leagues'))
+            .finally(() => setLeaguesLoading(false))
+    }, [user?.id])
+
+    const updateNotifyMissingPredictions = (leagueId, checked) => {
+        if (!leagueId) return
+        setSavingNotifyLeagueIds((prev) => {
+            const next = new Set(prev)
+            next.add(leagueId)
+            return next
+        })
+        // Optimistic update
+        setLeagues((prev) =>
+            (prev || []).map((l) => {
+                if (Number(l.id) !== Number(leagueId)) return l
+                const members = Array.isArray(l.members) ? l.members : []
+                return {
+                    ...l,
+                    members: members.map((m) =>
+                        Number(m.id) === Number(user?.id)
+                            ? { ...m, notify_missing_predictions: !!checked }
+                            : m
+                    ),
+                }
+            })
+        )
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/me`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notify_missing_predictions: checked }),
+        })
+            .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data.error || 'Failed to update notification setting')
+                if (data.league) {
+                    setLeagues((prev) => (prev || []).map((l) => (Number(l.id) === Number(leagueId) ? data.league : l)))
+                }
+            })
+            .catch((e) => {
+                setLeaguesError(e.message || 'Failed to update notification setting')
+                // Best-effort refresh
+                authenticatedFetch('/api/v1/leagues')
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((data) => {
+                        if (data?.leagues) setLeagues(data.leagues)
+                    })
+                    .catch(() => {})
+            })
+            .finally(() => {
+                setSavingNotifyLeagueIds((prev) => {
+                    const next = new Set(prev)
+                    next.delete(leagueId)
+                    return next
+                })
+            })
+    }
 
     const handleSaveAccount = () => {
         if (!user) return
@@ -200,6 +277,60 @@ function Profile() {
                             </Alert>
                         )}
                     </Box>
+                    <Divider sx={{ my: 3 }} />
+
+                    {/* Notifications */}
+                    <Typography variant="h6" sx={{ mb: 1 }}>
+                        Notifications
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Enable reminders per league when fixtures are within 24 hours and you haven&apos;t submitted predictions.
+                    </Typography>
+                    {leaguesLoading ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1 }}>
+                            <CircularProgress size={18} />
+                            <Typography variant="body2" color="text.secondary">Loading your leagues…</Typography>
+                        </Box>
+                    ) : leaguesError ? (
+                        <Alert severity="error" sx={{ mb: 2 }}>{leaguesError}</Alert>
+                    ) : leagues.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            You&apos;re not in any leagues yet.
+                        </Typography>
+                    ) : (
+                        <List dense disablePadding sx={{ mb: 2 }}>
+                            {leagues.map((league) => {
+                                const myMembership = (league.members || []).find((m) => Number(m.id) === Number(user?.id))
+                                const checked = !!myMembership?.notify_missing_predictions
+                                const savingNotify = savingNotifyLeagueIds.has(league.id)
+                                return (
+                                    <ListItem
+                                        key={league.id}
+                                        disableGutters
+                                        secondaryAction={
+                                            <FormControlLabel
+                                                control={
+                                                    <Switch
+                                                        checked={checked}
+                                                        onChange={(e) => updateNotifyMissingPredictions(league.id, e.target.checked)}
+                                                        disabled={!myMembership || savingNotify}
+                                                    />
+                                                }
+                                                label=""
+                                                sx={{ m: 0 }}
+                                            />
+                                        }
+                                    >
+                                        <ListItemText
+                                            primary={league.name}
+                                            secondary={savingNotify ? 'Saving…' : (checked ? 'Enabled' : 'Disabled')}
+                                        />
+                                    </ListItem>
+                                )
+                            })}
+                        </List>
+                    )}
+
                     <Divider sx={{ my: 3 }} />
 
                     {/* Email */}
