@@ -300,7 +300,7 @@ If you didn't request this, you can ignore this email.
     msg.attach(MIMEText(body, 'plain'))
     try:
         # Short timeout so worker doesn't hang (avoids WORKER TIMEOUT / SIGKILL)
-        with smtplib.SMTP(server, port, timeout=10) as smtp:
+        with smtplib.SMTP(server, port, timeout=8) as smtp:
             if use_tls:
                 smtp.starttls()
             if username and password:
@@ -2762,24 +2762,22 @@ def forgot_password():
         db.session.commit()
         reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
         to_email = str(user.email)
-        # Send email in background so the request returns immediately (avoids 502 from gateway timeout).
-        # We always return reset_link so the user can reset from the page; we don't claim email_sent
-        # since we don't wait for the result (avoids lying if SMTP fails).
+        # Send email in the request so it actually runs (daemon threads are often killed before
+        # completion on PaaS after the response is sent). Use short SMTP timeout to avoid 502.
+        email_sent = False
         if app.config.get('MAIL_SERVER') and reset_link:
-            def send_later():
-                try:
-                    if send_password_reset_email(to_email, reset_link):
-                        print(f"Password reset email sent to {to_email}")
-                    else:
-                        print(f"Password reset email not sent for {to_email}")
-                except Exception as e:
-                    print(f"send_password_reset_email failed: {e}")
-            t = threading.Thread(target=send_later, daemon=True)
-            t.start()
-        # Don't claim email_sent since we didn't wait for the background send (avoids 502; user can use reset_link)
+            try:
+                email_sent = send_password_reset_email(to_email, reset_link)
+                if email_sent:
+                    print(f"Password reset email sent to {to_email}")
+                else:
+                    print(f"Password reset email not sent for {to_email}")
+            except Exception as e:
+                print(f"send_password_reset_email failed: {e}")
+                email_sent = False
         payload = {
             'message': "If an account exists with that email, we've sent a reset link.",
-            'email_sent': False,
+            'email_sent': email_sent,
         }
         # Always include reset_link when we have one so user can reset even if email didn't send
         if reset_link:
