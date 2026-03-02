@@ -96,6 +96,8 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', '')  # e.g. "Fantasy Predictor <noreply@example.com>"
 # Base URL for reset link in email (your frontend). e.g. https://your-app.vercel.app
 app.config['RESET_PASSWORD_BASE_URL'] = os.getenv('RESET_PASSWORD_BASE_URL', '')
+# Set to 1/true to never attempt sending (avoids 502 if gateway timeout is very short). Reset link still returned.
+app.config['SKIP_PASSWORD_RESET_EMAIL'] = os.getenv('SKIP_PASSWORD_RESET_EMAIL', '').lower() in ('1', 'true', 'yes')
 # League that new signups are auto-joined to (e.g. "Predictor Community"). Set SIGNUP_LEAGUE_ID=11 or leave unset to add to no leagues.
 try:
     app.config['SIGNUP_LEAGUE_ID'] = int(os.getenv('SIGNUP_LEAGUE_ID', '11'))

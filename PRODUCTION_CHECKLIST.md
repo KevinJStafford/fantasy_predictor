@@ -61,7 +61,7 @@
    - Use `render.yaml` or manual setup
    - Set all environment variables
    - Build command: `pip install -r requirements.txt && cd server && flask db upgrade`
-   - Start command: `cd server && gunicorn app:app --bind 0.0.0.0:$PORT`
+   - Start command: `cd server && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120`
 
 4. **Deploy Frontend**
    - Use `render.yaml` or manual setup

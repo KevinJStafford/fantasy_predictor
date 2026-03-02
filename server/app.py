@@ -9,6 +9,7 @@ import threading
 import unicodedata
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import parseaddr
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from datetime import datetime, timedelta, timezone, date, time
 import jwt
@@ -284,6 +285,10 @@ def send_password_reset_email(to_email, reset_link):
     username = app.config.get('MAIL_USERNAME')
     password = app.config.get('MAIL_PASSWORD')
     sender = app.config.get('MAIL_DEFAULT_SENDER') or username or 'noreply@localhost'
+    # Envelope sender (MAIL FROM) must be a plain address; some providers reject "Name <email>"
+    _, envelope_from = parseaddr(sender)
+    if not envelope_from:
+        envelope_from = sender if '@' in sender else (username or 'noreply@localhost')
     subject = 'Reset your password'
     body = f'''Someone requested a password reset for your account.
 
@@ -299,16 +304,15 @@ If you didn't request this, you can ignore this email.
     msg['To'] = to_email
     msg.attach(MIMEText(body, 'plain'))
     try:
-        # Short timeout so worker doesn't hang (avoids WORKER TIMEOUT / SIGKILL)
-        with smtplib.SMTP(server, port, timeout=8) as smtp:
+        with smtplib.SMTP(server, port, timeout=30) as smtp:
             if use_tls:
                 smtp.starttls()
             if username and password:
                 smtp.login(username, password)
-            smtp.sendmail(sender, to_email, msg.as_string())
+            smtp.sendmail(envelope_from, to_email, msg.as_string())
         return True
     except Exception as e:
-        print(f"Failed to send password reset email: {e}")
+        print(f"Password reset email failed [{type(e).__name__}]: {e}")
         return False
 
 
@@ -2762,10 +2766,9 @@ def forgot_password():
         db.session.commit()
         reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
         to_email = str(user.email)
-        # Send email in the request so it actually runs (daemon threads are often killed before
-        # completion on PaaS after the response is sent). Use short SMTP timeout to avoid 502.
+        # Send email in request; 502 was from Gunicorn worker timeout, not Render proxy. Use gunicorn --timeout 120.
         email_sent = False
-        if app.config.get('MAIL_SERVER') and reset_link:
+        if app.config.get('MAIL_SERVER') and reset_link and not app.config.get('SKIP_PASSWORD_RESET_EMAIL'):
             try:
                 email_sent = send_password_reset_email(to_email, reset_link)
                 if email_sent:

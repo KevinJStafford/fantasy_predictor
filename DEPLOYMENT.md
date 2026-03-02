@@ -41,14 +41,14 @@ git push origin main
    - **Python Version**: `3.11` (IMPORTANT: Select 3.11, not 3.13! psycopg2-binary doesn't support 3.13 yet)
    - **Region**: Same as database
    - **Branch**: `main` (or your default branch)
-   - **Root Directory**: **Leave blank** (repo root). This is required so `requirements.txt` at the repo root is found. If you set Root Directory to `server`, use Build Command: `pip install -r requirements.txt && flask db upgrade` instead (and `gunicorn app:app --bind 0.0.0.0:$PORT` for Start).
+   - **Root Directory**: **Leave blank** (repo root). This is required so `requirements.txt` at the repo root is found. If you set Root Directory to `server`, use Build Command: `pip install -r requirements.txt && flask db upgrade` instead (and `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120` for Start).
    - **Build Command**: 
      ```bash
      pip install -r requirements.txt && cd server && flask db upgrade
      ```
    - **Start Command**:
      ```bash
-     cd server && gunicorn app:app --bind 0.0.0.0:$PORT
+     cd server && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
      ```
 4. Click **"Advanced"** and add Environment Variables:
    - `FLASK_APP` = `app.py`
@@ -124,7 +124,7 @@ If migrations didn't run during build, you can trigger them manually:
 
 ### Backend won't start / "Exited with status 1"
 - Open your backend service → **Logs** tab and scroll to the **bottom** of the latest deploy. The real error (e.g. `ModuleNotFoundError`, `SECRET_KEY must be set`, database connection) appears there.
-- **Root Directory**: If set to `server`, use Build Command `pip install -r requirements.txt && flask db upgrade` and Start Command `gunicorn app:app --bind 0.0.0.0:$PORT` (no `cd server`).
+- **Root Directory**: If set to `server`, use Build Command `pip install -r requirements.txt && flask db upgrade` and Start Command `gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120` (no `cd server`).
 - **SECRET_KEY**: Must be set in Environment (Render can "Generate" it). If missing, the app will fail with a clear message in logs.
 - **DATABASE_URL**: Use the **Internal** database URL. The app converts `postgres://` to `postgresql://` automatically.
 - Ensure `gunicorn` and `psycopg2-binary` are in `server/requirements.txt` (or root `requirements.txt` if not using Root Directory).

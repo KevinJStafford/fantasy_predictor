@@ -24,7 +24,7 @@ postgresql://fantasy_predictor_user:SvSSFDWawNA5mKQQQlim1ZxqEudZbIVN@dpg-d5qgtr6
      ```
    - **Start Command**:
      ```bash
-     cd server && gunicorn app:app --bind 0.0.0.0:$PORT
+     cd server && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
      ```
 
 5. **Environment Variables** (click "Advanced"):

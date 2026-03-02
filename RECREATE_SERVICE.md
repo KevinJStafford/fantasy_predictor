@@ -28,7 +28,7 @@
      ```
    - **Start Command**:
      ```bash
-     cd server && gunicorn app:app --bind 0.0.0.0:$PORT
+     cd server && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
      ```
 
 ### 3. Environment Variables

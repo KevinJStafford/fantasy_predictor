@@ -85,3 +85,4 @@ When a user requests a password reset, the backend can send the reset link by em
 
 - **“Email never sends”** – If you never receive the reset email, the app always shows a **“Reset password”** link on the Forgot Password success screen when an account exists. Use that link to reset; it expires in 1 hour.
 - To enable real email delivery, set `MAIL_SERVER` and the other `MAIL_*` variables in your backend environment (e.g. Render dashboard). See Gmail / SendGrid / Mailgun above.
+- **"email_sent is false"** – Check backend logs (e.g. Render → Logs). The app logs `Password reset email failed [ExceptionType]: message`. For SendGrid: use `MAIL_USERNAME=apikey` (literal) and your API key as `MAIL_PASSWORD`; ensure the sender in `MAIL_DEFAULT_SENDER` is verified in SendGrid.
