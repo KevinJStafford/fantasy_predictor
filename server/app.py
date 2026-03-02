@@ -275,20 +275,40 @@ def is_league_admin(user_id, league_id):
     return m is not None and m.role == 'admin'
 
 
+def _send_password_reset_via_sendgrid_api(to_email, from_email, from_name, subject, body, api_key):
+    """Send via SendGrid v3 HTTP API. Returns True on 202, False otherwise. Avoids SMTP timeouts."""
+    if not REQUESTS_AVAILABLE or not api_key:
+        return False
+    url = 'https://api.sendgrid.com/v3/mail/send'
+    payload = {
+        'personalizations': [{'to': [{'email': to_email}]}],
+        'from': {'email': from_email, 'name': from_name or None},
+        'subject': subject,
+        'content': [{'type': 'text/plain', 'value': body}],
+    }
+    if not payload['from']['name']:
+        del payload['from']['name']
+    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=15)
+        if r.status_code == 202:
+            return True
+        print(f"SendGrid API returned {r.status_code}: {r.text[:500]}")
+        return False
+    except Exception as e:
+        print(f"SendGrid API request failed [{type(e).__name__}]: {e}")
+        return False
+
+
 def send_password_reset_email(to_email, reset_link):
-    """Send password reset email via SMTP. Returns True on success, False on failure."""
-    server = app.config.get('MAIL_SERVER')
+    """Send password reset email. Prefers SendGrid HTTP API when using SendGrid (avoids SMTP timeouts)."""
+    server = (app.config.get('MAIL_SERVER') or '').strip().lower()
     if not server:
         return False
-    port = app.config.get('MAIL_PORT', 587)
-    use_tls = app.config.get('MAIL_USE_TLS', True)
-    username = app.config.get('MAIL_USERNAME')
-    password = app.config.get('MAIL_PASSWORD')
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or username or 'noreply@localhost'
-    # Envelope sender (MAIL FROM) must be a plain address; some providers reject "Name <email>"
-    _, envelope_from = parseaddr(sender)
-    if not envelope_from:
-        envelope_from = sender if '@' in sender else (username or 'noreply@localhost')
+    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME') or 'noreply@localhost'
+    from_name, from_email = parseaddr(sender)
+    if not from_email:
+        from_email = sender if '@' in sender else 'noreply@localhost'
     subject = 'Reset your password'
     body = f'''Someone requested a password reset for your account.
 
@@ -298,22 +318,37 @@ Click the link below to set a new password (link expires in 1 hour):
 
 If you didn't request this, you can ignore this email.
 '''
+    # Use SendGrid HTTP API when possible — one fast HTTP request, no SMTP connection timeout
+    if 'sendgrid' in server and app.config.get('MAIL_PASSWORD'):
+        if _send_password_reset_via_sendgrid_api(to_email, from_email, from_name or 'Fantasy Predictor', subject, body, app.config['MAIL_PASSWORD']):
+            return True
+        # Fall back to SMTP if API fails (e.g. wrong key format)
+    # SMTP path
+    port = app.config.get('MAIL_PORT', 587)
+    use_tls = app.config.get('MAIL_USE_TLS', True)
+    username = app.config.get('MAIL_USERNAME')
+    password = app.config.get('MAIL_PASSWORD')
+    try:
+        with smtplib.SMTP(server, port, timeout=15) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username and password:
+                smtp.login(username, password)
+            smtp.sendmail(from_email, to_email, _make_plain_email_message(sender, to_email, subject, body))
+        return True
+    except Exception as e:
+        print(f"Password reset email failed [{type(e).__name__}]: {e}")
+        return False
+
+
+def _make_plain_email_message(sender, to_email, subject, body):
+    """Build a simple RFC-style message for SMTP."""
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From'] = sender
     msg['To'] = to_email
     msg.attach(MIMEText(body, 'plain'))
-    try:
-        with smtplib.SMTP(server, port, timeout=30) as smtp:
-            if use_tls:
-                smtp.starttls()
-            if username and password:
-                smtp.login(username, password)
-            smtp.sendmail(envelope_from, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Password reset email failed [{type(e).__name__}]: {e}")
-        return False
+    return msg.as_string()
 
 
 # Note: Renamed Predictions Resource class to avoid conflict with model
