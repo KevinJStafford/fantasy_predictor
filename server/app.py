@@ -181,6 +181,10 @@ def _send_missing_predictions_notifications():
     base_url = (app.config.get('RESET_PASSWORD_BASE_URL') or '').strip().rstrip('/') or 'https://playfantasypredictor.com'
     sent = 0
     for comp_slug, fixtures in fixtures_by_comp.items():
+        # Round we're reminding about (e.g. 28) — send only once per round per (user, league)
+        reminder_round = min((f.fixture_round for f in fixtures if f.fixture_round is not None), default=None)
+        if reminder_round is None:
+            continue
         if comp_slug == 'eng.1':
             leagues = League.query.filter(or_(League.competition_slug == 'eng.1', League.competition_slug.is_(None))).all()
         else:
@@ -190,6 +194,9 @@ def _send_missing_predictions_notifications():
                 if not getattr(lm, 'notify_missing_predictions', False):
                     continue
                 if lm.user.deleted_at:
+                    continue
+                # Already sent a reminder for this round — only send once per round
+                if getattr(lm, 'last_missing_predictions_round', None) == reminder_round:
                     continue
                 # Check if member has any prediction (Game) for any of the upcoming fixtures
                 has_any = False
@@ -221,8 +228,10 @@ Submit your predictions here: {link}
 — Fantasy Predictor
 """
                 if send_notification_email(str(lm.user.email), subject, body):
+                    lm.last_missing_predictions_round = reminder_round
+                    db.session.commit()
                     sent += 1
-                    print(f"Sent missing-predictions reminder to {lm.user.email} for league {league.name}")
+                    print(f"Sent missing-predictions reminder to {lm.user.email} for league {league.name} (round {reminder_round})")
     return sent, None
 
 

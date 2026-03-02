@@ -20,6 +20,7 @@ class LeagueMembership(db.Model, SerializerMixin):
     backfill_losses = db.Column(db.Integer, nullable=True)
     backfill_points = db.Column(db.Integer, nullable=True)
     notify_missing_predictions = db.Column(db.Boolean, nullable=False, default=False)  # email when fixtures in <24h and no predictions saved
+    last_missing_predictions_round = db.Column(db.Integer, nullable=True)  # last round we sent a reminder for (send only once per round)
 
     __table_args__ = (db.UniqueConstraint('league_id', 'display_name', name='uq_league_display_name'),)
 
