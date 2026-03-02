@@ -2817,9 +2817,6 @@ def forgot_password():
             'message': "If an account exists with that email, we've sent a reset link.",
             'email_sent': email_sent,
         }
-        # Always include reset_link when we have one so user can reset even if email didn't send
-        if reset_link:
-            payload['reset_link'] = reset_link
         return make_response(payload, 200)
     return make_response({
         'message': "If an account exists with that email, we've sent a reset link.",
