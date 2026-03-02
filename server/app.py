@@ -159,6 +159,91 @@ def health():
     return make_response({'status': 'ok'}, 200)
 
 
+def _send_missing_predictions_notifications():
+    """Find leagues with fixtures in <24h, members who opted in and have no predictions for those fixtures; send reminder email. Returns (sent_count, error_message or None)."""
+    now_utc = datetime.now(timezone.utc)
+    # Use naive UTC for DB comparison (Fixture.fixture_date is often stored without tz)
+    now_naive = now_utc.replace(tzinfo=None) if now_utc.tzinfo else now_utc
+    end_naive = now_naive + timedelta(hours=24)
+    upcoming = Fixture.query.filter(
+        Fixture.fixture_date.isnot(None),
+        Fixture.fixture_date > now_naive,
+        Fixture.fixture_date <= end_naive,
+        or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)),
+    ).all()
+    if not upcoming:
+        return 0, None
+    # Group by competition_slug (eng.1 and None treated as same for league matching)
+    fixtures_by_comp = {}
+    for f in upcoming:
+        comp = getattr(f, 'competition_slug', None) or 'eng.1'
+        fixtures_by_comp.setdefault(comp, []).append(f)
+    base_url = (app.config.get('RESET_PASSWORD_BASE_URL') or '').strip().rstrip('/') or 'https://playfantasypredictor.com'
+    sent = 0
+    for comp_slug, fixtures in fixtures_by_comp.items():
+        if comp_slug == 'eng.1':
+            leagues = League.query.filter(or_(League.competition_slug == 'eng.1', League.competition_slug.is_(None))).all()
+        else:
+            leagues = League.query.filter(League.competition_slug == comp_slug).all()
+        for league in leagues:
+            for lm in league.league_memberships:
+                if not getattr(lm, 'notify_missing_predictions', False):
+                    continue
+                if lm.user.deleted_at:
+                    continue
+                # Check if member has any prediction (Game) for any of the upcoming fixtures
+                has_any = False
+                for fixture in fixtures:
+                    g = Game.query.filter_by(
+                        user_id=lm.user_id,
+                        home_team=fixture.fixture_home_team,
+                        away_team=fixture.fixture_away_team,
+                    ).first()
+                    if g:
+                        has_any = True
+                        break
+                    for g in Game.query.filter_by(user_id=lm.user_id).all():
+                        if _fixture_matches_game(fixture, g.home_team, g.away_team):
+                            has_any = True
+                            break
+                    if has_any:
+                        break
+                if has_any:
+                    continue
+                link = f"{base_url}/#/predictions?league={league.id}"
+                subject = f"Reminder: submit predictions for {league.name}"
+                body = f"""Hi,
+
+Your league "{league.name}" has fixtures in the next 24 hours and you haven't submitted predictions yet.
+
+Submit your predictions here: {link}
+
+— Fantasy Predictor
+"""
+                if send_notification_email(str(lm.user.email), subject, body):
+                    sent += 1
+                    print(f"Sent missing-predictions reminder to {lm.user.email} for league {league.name}")
+    return sent, None
+
+
+@app.route('/api/v1/notifications/send-missing-predictions', methods=['GET'])
+def send_missing_predictions_cron():
+    """Cron endpoint: send email to players who enabled notify_missing_predictions when their league has fixtures in <24h and they have no predictions. Require X-Cron-Secret header."""
+    secret = (request.headers.get('X-Cron-Secret') or '').strip()
+    if not secret or secret != app.config.get('NOTIFICATION_CRON_SECRET'):
+        return make_response({'error': 'Unauthorized'}, 401)
+    try:
+        sent, err = _send_missing_predictions_notifications()
+        if err:
+            return make_response({'error': err}, 500)
+        return make_response({'sent': sent}, 200)
+    except Exception as e:
+        print(f"send_missing_predictions_cron failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return make_response({'error': str(e)}, 500)
+
+
 # JWT token helper functions
 def generate_token(user_id):
     """Generate a JWT token for a user"""
@@ -349,6 +434,35 @@ def _make_plain_email_message(sender, to_email, subject, body):
     msg['To'] = to_email
     msg.attach(MIMEText(body, 'plain'))
     return msg.as_string()
+
+
+def send_notification_email(to_email, subject, body):
+    """Send a transactional email (e.g. missing-predictions reminder). Uses same config as password reset."""
+    server = (app.config.get('MAIL_SERVER') or '').strip().lower()
+    if not server:
+        return False
+    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME') or 'noreply@localhost'
+    from_name, from_email = parseaddr(sender)
+    if not from_email:
+        from_email = sender if '@' in sender else 'noreply@localhost'
+    if 'sendgrid' in server and app.config.get('MAIL_PASSWORD'):
+        if _send_password_reset_via_sendgrid_api(to_email, from_email, from_name or 'Fantasy Predictor', subject, body, app.config['MAIL_PASSWORD']):
+            return True
+    port = app.config.get('MAIL_PORT', 587)
+    use_tls = app.config.get('MAIL_USE_TLS', True)
+    username = app.config.get('MAIL_USERNAME')
+    password = app.config.get('MAIL_PASSWORD')
+    try:
+        with smtplib.SMTP(server, port, timeout=15) as smtp:
+            if use_tls:
+                smtp.starttls()
+            if username and password:
+                smtp.login(username, password)
+            smtp.sendmail(from_email, to_email, _make_plain_email_message(sender, to_email, subject, body))
+        return True
+    except Exception as e:
+        print(f"Notification email failed [{type(e).__name__}]: {e}")
+        return False
 
 
 # Note: Renamed Predictions Resource class to avoid conflict with model
@@ -3055,18 +3169,21 @@ def update_my_league_display_name(league_id):
         if not membership:
             return make_response({'error': 'You are not a member of this league'}, 403)
         data = request.get_json() or {}
-        new_name = (data.get('display_name') or '').strip()
-        if not new_name:
-            return make_response({'error': 'Display name cannot be empty'}, 400)
-        # Uniqueness: no other member in this league has this display name (case-insensitive)
-        for lm in league.league_memberships:
-            if lm.user_id != user_id and (lm.display_name or '').strip().lower() == new_name.lower():
-                return make_response({'error': 'That display name is already taken in this league'}, 400)
-        membership.display_name = new_name
+        if 'display_name' in data:
+            new_name = (data.get('display_name') or '').strip()
+            if not new_name:
+                return make_response({'error': 'Display name cannot be empty'}, 400)
+            for lm in league.league_memberships:
+                if lm.user_id != user_id and (lm.display_name or '').strip().lower() == new_name.lower():
+                    return make_response({'error': 'That display name is already taken in this league'}, 400)
+            membership.display_name = new_name
+        if 'notify_missing_predictions' in data:
+            membership.notify_missing_predictions = bool(data.get('notify_missing_predictions'))
         db.session.commit()
         return make_response({
-            'message': 'Display name updated',
+            'message': 'Updated',
             'display_name': membership.display_name,
+            'notify_missing_predictions': membership.notify_missing_predictions,
             'league': league.to_dict(),
         }, 200)
     except Exception as e:

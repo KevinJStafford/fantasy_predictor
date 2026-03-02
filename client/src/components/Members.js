@@ -5,7 +5,7 @@ import {useEffect, useState} from 'react'
 import { useLocation, useHistory } from 'react-router-dom'
 import {
     Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel
+    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import { apiUrl, authenticatedFetch } from '../utils/api'
@@ -53,6 +53,7 @@ function Members() {
     const [displayNameDraft, setDisplayNameDraft] = useState('')
     const [displayNameError, setDisplayNameError] = useState(null)
     const [displayNameSaving, setDisplayNameSaving] = useState(false)
+    const [notifyMissingSaving, setNotifyMissingSaving] = useState(false)
 
     // Prefer backend is_admin flag; fallback to member role or league creator
     const isAdmin = leagueDetail?.is_admin === true ||
@@ -426,6 +427,23 @@ function Members() {
             })
             .catch(() => setDisplayNameError('Failed to update display name. Please try again.'))
             .finally(() => setDisplayNameSaving(false))
+    }
+
+    function handleNotifyMissingPredictionsChange(checked) {
+        if (!leagueId) return
+        setNotifyMissingSaving(true)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/me`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notify_missing_predictions: checked }),
+        })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (ok && data.league) {
+                    setLeagueDetail(data.league)
+                }
+            })
+            .finally(() => setNotifyMissingSaving(false))
     }
 
     function handleDeleteLeague() {
@@ -900,21 +918,38 @@ function Members() {
                 <Box sx={{ position: 'sticky', top: 20 }}>
                     {/* Your display name in this league */}
                     {leagueId && myMembership && (
-                        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                            <Typography variant="body2" color="text.secondary">
-                                Your display name in this league:
-                            </Typography>
-                            <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>
-                                {myMembership.display_name}
-                            </Typography>
-                            <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={<EditIcon />}
-                                onClick={handleOpenDisplayNameDialog}
-                            >
-                                Update name
-                            </Button>
+                        <Box sx={{ mb: 2 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                                <Typography variant="body2" color="text.secondary">
+                                    Your display name in this league:
+                                </Typography>
+                                <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>
+                                    {myMembership.display_name}
+                                </Typography>
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<EditIcon />}
+                                    onClick={handleOpenDisplayNameDialog}
+                                >
+                                    Update name
+                                </Button>
+                            </Box>
+                            <FormControlLabel
+                                control={
+                                    <Switch
+                                        checked={!!myMembership.notify_missing_predictions}
+                                        onChange={(e) => handleNotifyMissingPredictionsChange(e.target.checked)}
+                                        disabled={notifyMissingSaving}
+                                        size="small"
+                                    />
+                                }
+                                label={
+                                    <Typography variant="body2" color="text.secondary">
+                                        Email me when fixtures are in 24 hours and I haven&apos;t submitted predictions
+                                    </Typography>
+                                }
+                            />
                         </Box>
                     )}
                     {/* Leaderboard Table */}

@@ -98,6 +98,8 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', '')  # e.g.
 app.config['RESET_PASSWORD_BASE_URL'] = os.getenv('RESET_PASSWORD_BASE_URL', '')
 # Set to 1/true to never attempt sending (avoids 502 if gateway timeout is very short). Reset link still returned.
 app.config['SKIP_PASSWORD_RESET_EMAIL'] = os.getenv('SKIP_PASSWORD_RESET_EMAIL', '').lower() in ('1', 'true', 'yes')
+# Secret for cron to trigger missing-predictions emails. Set NOTIFICATION_CRON_SECRET and call GET /api/v1/notifications/send-missing-predictions with header X-Cron-Secret: <secret>
+app.config['NOTIFICATION_CRON_SECRET'] = os.getenv('NOTIFICATION_CRON_SECRET', '')
 # League that new signups are auto-joined to (e.g. "Predictor Community"). Set SIGNUP_LEAGUE_ID=11 or leave unset to add to no leagues.
 try:
     app.config['SIGNUP_LEAGUE_ID'] = int(os.getenv('SIGNUP_LEAGUE_ID', '11'))

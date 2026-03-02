@@ -19,6 +19,7 @@ class LeagueMembership(db.Model, SerializerMixin):
     backfill_draws = db.Column(db.Integer, nullable=True)
     backfill_losses = db.Column(db.Integer, nullable=True)
     backfill_points = db.Column(db.Integer, nullable=True)
+    notify_missing_predictions = db.Column(db.Boolean, nullable=False, default=False)  # email when fixtures in <24h and no predictions saved
 
     __table_args__ = (db.UniqueConstraint('league_id', 'display_name', name='uq_league_display_name'),)
 
@@ -188,6 +189,7 @@ class League(db.Model, SerializerMixin):
                     'email': lm.user.email,
                     'role': lm.role,
                     'created_at': lm.user.created_at.isoformat() if lm.user.created_at else None,
+                    'notify_missing_predictions': getattr(lm, 'notify_missing_predictions', False),
                 }
                 for lm in self.league_memberships
             ]
