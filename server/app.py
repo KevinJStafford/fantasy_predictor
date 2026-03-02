@@ -2762,18 +2762,18 @@ def forgot_password():
         db.session.commit()
         reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
         to_email = str(user.email)
-        # Send email in background so we don't block the worker (avoids WORKER TIMEOUT / SIGKILL)
+        # Send email synchronously so we can report actual success/failure (SMTP has 10s timeout)
         email_sent = False
         if app.config.get('MAIL_SERVER') and reset_link:
-            def send_later():
-                try:
-                    send_password_reset_email(to_email, reset_link)
-                except Exception as e:
-                    print(f"Background send_password_reset_email failed: {e}")
-            t = threading.Thread(target=send_later, daemon=True)
-            t.start()
-            # Assume email will be sent; reset_link is always in response so user can reset either way
-            email_sent = True
+            try:
+                email_sent = send_password_reset_email(to_email, reset_link)
+                if email_sent:
+                    print(f"Password reset email sent to {to_email}")
+                else:
+                    print(f"Password reset email not sent (SMTP failed or MAIL_SERVER not configured) for {to_email}")
+            except Exception as e:
+                print(f"send_password_reset_email failed: {e}")
+                email_sent = False
         payload = {
             'message': "If an account exists with that email, we've sent a reset link.",
             'email_sent': email_sent,
