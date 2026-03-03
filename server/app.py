@@ -3586,35 +3586,18 @@ def get_league_leaderboard(league_id):
             actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
             return 'Draw' if pred_winner == actual_winner else 'Loss'
 
-        def _fixture_for_game(game):
-            f = Fixture.query.filter_by(
-                fixture_home_team=game.home_team,
-                fixture_away_team=game.away_team
-            ).first()
-            if f:
-                return f
-            for f in Fixture.query.all():
-                if _fixture_matches_game(f, game.home_team, game.away_team):
-                    return f
-            return None
-
-        def _member_has_game_for_fixture(member_id, fixture):
-            """True if member has a Game (prediction) for this fixture."""
-            g = Game.query.filter_by(
-                user_id=member_id,
-                home_team=fixture.fixture_home_team,
-                away_team=fixture.fixture_away_team
-            ).first()
-            if g:
-                return True
-            for g in Game.query.filter_by(user_id=member_id).all():
-                if _fixture_matches_game(fixture, g.home_team, g.away_team):
-                    return True
-            return False
-
         # Completed fixtures = have both scores (missed pick counts as Loss).
         # Only consider fixtures for this league's competition and on or after league creation.
         league_competition_slug = getattr(league, 'competition_slug', None) or 'eng.1'
+
+        def _member_has_game_for_fixture(member_id, fixture):
+            """True if member has a Game (prediction) for this fixture (using league competition for matching)."""
+            for g in Game.query.filter_by(user_id=member_id).all():
+                resolved = _fixture_for_game(g, league_competition_slug)
+                if resolved and resolved.id == fixture.id:
+                    return True
+            return False
+
         comp_filter = _fixture_query_competition(league_competition_slug)
         completed_fixtures = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
@@ -3660,7 +3643,7 @@ def get_league_leaderboard(league_id):
                     wins, draws, losses = 0, 0, 0
                     games = Game.query.filter_by(user_id=lm.user.id).all()
                     for g in games:
-                        fixture = _fixture_for_game(g)
+                        fixture = _fixture_for_game(g, league_competition_slug)
                         if not fixture or fixture.fixture_round != round_num or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
                             continue
                         res = _result_for_game(g, fixture)
@@ -3672,7 +3655,7 @@ def get_league_leaderboard(league_id):
                             losses += 1
                     rounds_with_pick = set()
                     for g in games:
-                        fx = _fixture_for_game(g)
+                        fx = _fixture_for_game(g, league_competition_slug)
                         if fx and fx.fixture_round == round_num and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                             rounds_with_pick.add(fx.fixture_round)
                     for f in round_fixtures:
@@ -3718,7 +3701,7 @@ def get_league_leaderboard(league_id):
                     wins, draws, losses = 0, 0, 0
                     games = Game.query.filter_by(user_id=lm.user.id).all()
                     for g in games:
-                        fixture = _fixture_for_game(g)
+                        fixture = _fixture_for_game(g, league_competition_slug)
                         if not fixture or fixture.fixture_round != current_round or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
                             continue
                         res = _result_for_game(g, fixture)
@@ -3730,7 +3713,7 @@ def get_league_leaderboard(league_id):
                             losses += 1
                     rounds_with_pick = set()
                     for g in games:
-                        fx = _fixture_for_game(g)
+                        fx = _fixture_for_game(g, league_competition_slug)
                         if fx and fx.fixture_round == current_round and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                             rounds_with_pick.add(fx.fixture_round)
                     for f in round_fixtures:
@@ -3767,7 +3750,7 @@ def get_league_leaderboard(league_id):
             # Add live results from member's predictions for fixtures that have scores (only on or after league creation, same competition)
             games = Game.query.filter_by(user_id=member.id).all()
             for g in games:
-                fixture = _fixture_for_game(g)
+                fixture = _fixture_for_game(g, league_competition_slug)
                 if not _fixture_matches_league_competition(fixture, league) or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
                     continue
                 result = _result_for_game(g, fixture)
@@ -3780,7 +3763,7 @@ def get_league_leaderboard(league_id):
             # Missed pick = no prediction for a completed fixture in a round where they have at least one pick (on or after league creation, same competition) → count as Loss
             rounds_with_pick = set()
             for g in games:
-                fx = _fixture_for_game(g)
+                fx = _fixture_for_game(g, league_competition_slug)
                 if fx and fx.fixture_round is not None and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                     rounds_with_pick.add(fx.fixture_round)
             for f in completed_fixtures:
