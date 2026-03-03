@@ -356,10 +356,11 @@ function Members() {
         })
     }
 
-    function fetchLeaderboard() {
+    function fetchLeaderboard(round = null) {
         if (!leagueId) return
         setLoadingLeaderboard(true)
-        authenticatedFetch(`/api/v1/leagues/${leagueId}/leaderboard?t=${Date.now()}`)
+        const roundQ = round != null ? `&round=${round}` : ''
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/leaderboard?t=${Date.now()}${roundQ}`)
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Failed to fetch leaderboard')
@@ -588,6 +589,14 @@ function Members() {
         getAvailableRounds()
         loadCurrentRoundAndFixtures()
     }, [selectedCompetition])
+
+    // When user selects a different week from dropdown (weekly leagues), refetch leaderboard for that week
+    useEffect(() => {
+        if (leagueId && leaderboardScope === 'weekly' && gameWeek) {
+            const roundNum = parseInt(gameWeek, 10)
+            if (!Number.isNaN(roundNum)) fetchLeaderboard(roundNum)
+        }
+    }, [gameWeek, leaderboardScope, leagueId])
 
     const handleDropdownChange = (e) => {
         const selectedValue = e.target.value;
