@@ -601,11 +601,10 @@ STANDINGS_API_URL = os.getenv(
 )
 
 # Supported competitions for predictions.
-# source='premier_league' uses EXTERNAL_FIXTURES_API_URL; source='espn' uses ESPN API;
-# source='football_data' uses api.football-data.org (official matchdays; set FOOTBALL_DATA_ORG_API_KEY).
-# football-data.org free tier: https://www.football-data.org/coverage
+# source='football_data' uses api.football-data.org (set FOOTBALL_DATA_ORG_API_KEY); source='espn' uses ESPN API.
+# football-data.org free tier: https://www.football-data.org/coverage (includes Premier League = PL)
 SUPPORTED_COMPETITIONS = [
-    {'slug': 'eng.1', 'name': 'English Premier League', 'source': 'premier_league', 'api_url': 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=400'},
+    {'slug': 'eng.1', 'name': 'English Premier League', 'source': 'football_data', 'football_data_code': 'PL'},
     {'slug': 'eng.2', 'name': 'EFL Championship', 'source': 'football_data', 'football_data_code': 'ELC'},
     {'slug': 'esp.1', 'name': 'La Liga', 'source': 'espn', 'espn_slug': 'esp.1'},
     {'slug': 'fra.1', 'name': 'Ligue 1', 'source': 'espn', 'espn_slug': 'fra.1'},
@@ -1512,7 +1511,7 @@ def sync_fixtures():
             comp_slug = league_slug or (data.get('competition') or '').strip()
             comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == comp_slug and c.get('source') == 'football_data'), None)
             if not comp:
-                return make_response({'error': 'Bundesliga (ger.1) uses football-data.org. Set FOOTBALL_DATA_ORG_API_KEY and sync with competition=ger.1.'}, 400)
+                return make_response({'error': 'Set FOOTBALL_DATA_ORG_API_KEY and use competition=slug (e.g. eng.1, ger.1, eng.2).'}, 400)
             code = comp.get('football_data_code') or 'BL1'
             try:
                 added, updated, seen, err = _sync_fixtures_football_data(code, comp_slug)
@@ -2342,8 +2341,8 @@ def sync_fixture_scores():
             competition_slug = (data.get('competition') or data.get('league_slug') or '').strip()
             api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
         
-        # Non-Premier League: run fixture sync for that competition (updates scores from football-data or ESPN)
-        if competition_slug and competition_slug != 'eng.1':
+        # All leagues (including Premier League eng.1) use competition=slug; football-data.org or ESPN.
+        if competition_slug:
             comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == competition_slug), None)
             if comp and comp.get('source') == 'football_data':
                 added, updated, seen, err = _sync_fixtures_football_data(
@@ -2358,6 +2357,7 @@ def sync_fixture_scores():
                     'added': added,
                     'updated': updated,
                     'fixtures_seen': seen,
+                    'fixtures_updated': updated,
                 }, 200)
             if comp and comp.get('source') == 'espn':
                 added, updated, seen, err = _sync_fixtures_espn(comp.get('espn_slug') or competition_slug)
@@ -2369,20 +2369,18 @@ def sync_fixture_scores():
                     'added': added,
                     'updated': updated,
                     'fixtures_seen': seen,
+                    'fixtures_updated': updated,
                 }, 200)
             if comp:
                 return make_response({'error': f'Unknown sync source for {competition_slug}'}, 400)
             return make_response({'error': f'Unknown competition: {competition_slug}'}, 400)
         
         if not api_url:
-            # Default Premier League pulselive URL when no competition or eng.1 (e.g. GET ?competition=eng.1)
-            api_url = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
-        if not api_url:
             return make_response({
-                'error': 'Provide api_url (Premier League) or competition=slug (e.g. ger.1, eng.2) in request body or query.'
+                'error': 'Provide competition=slug (e.g. eng.1, ger.1, eng.2) in request body or query. Premier League is eng.1.'
             }, 400)
         
-        # Force a higher limit and fetch all pages
+        # Legacy: pulselive API when api_url is provided (no competition). Prefer competition=eng.1 + football-data.
         effective_api_url = api_url
         try:
             parsed = urlparse(api_url)

@@ -149,12 +149,8 @@ function Members() {
             .catch(() => {})
 
         if (!isAdmin) return
-        // Admin: refresh scores. All leagues use sync-scores: PL with api_url, others with competition=slug (backend runs football-data or ESPN sync).
-        const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
-        const isPremierLeague = effectiveCompetition === 'eng.1'
-        const syncBody = isPremierLeague
-            ? { api_url: SYNC_SCORES_API_URL }
-            : { competition: effectiveCompetition }
+        // Admin: refresh scores. All leagues (including Premier League eng.1) use competition=slug; backend uses football-data.org or ESPN.
+        const syncBody = { competition: effectiveCompetition || 'eng.1' }
         setSyncing(true)
         const syncPromise = authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
             method: 'POST',
@@ -248,13 +244,9 @@ function Members() {
         })
     }
 
-    const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
-
     function refreshScores() {
         if (!leagueId && !effectiveCompetition) return
-        const isPremierLeague = effectiveCompetition === 'eng.1'
         const params = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
-        if (isPremierLeague) params.set('api_url', SYNC_SCORES_API_URL)
         const url = apiUrl('/api/v1/fixtures/sync-scores') + '?' + params.toString()
         setSyncing(true)
         setSyncMessage(null)
@@ -306,8 +298,10 @@ function Members() {
             body = { source: 'football_data', league_slug: comp.slug, competition: comp.slug }
         } else if (isEspn) {
             body = { source: 'espn', league_slug: comp.espn_slug || comp.slug }
+        } else if (effectiveCompetition === 'eng.1' || (comp && comp.slug === 'eng.1')) {
+            body = { source: 'football_data', league_slug: 'eng.1', competition: 'eng.1' }
         } else {
-            body = { api_url: (comp && comp.api_url) || SYNC_SCORES_API_URL }
+            body = { source: 'football_data', league_slug: effectiveCompetition || 'eng.1', competition: effectiveCompetition || 'eng.1' }
         }
         fetch(apiUrl('/api/v1/fixtures/sync'), {
             method: 'POST',
@@ -349,11 +343,9 @@ function Members() {
             ].filter(Boolean).join(' | ')
 
             let text = `Sync complete. ${details}`
-            // After syncing fixture list, pull in latest scores for this league
+            // After syncing fixture list, pull in latest scores for this league (all use competition=slug)
             try {
-                const isPL = effectiveCompetition === 'eng.1'
                 const scoreParams = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
-                if (isPL) scoreParams.set('api_url', SYNC_SCORES_API_URL)
                 const scoreRes = await authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores') + '?' + scoreParams.toString(), { method: 'GET' })
                 const scoreData = await (scoreRes.ok ? scoreRes.json() : scoreRes.json().then(() => ({})))
                 const scoreUpdated = scoreData.fixtures_updated ?? scoreData.updated ?? 0
