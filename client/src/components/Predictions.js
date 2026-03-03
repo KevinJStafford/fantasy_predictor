@@ -242,6 +242,11 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                         sx={{ width: 64 }}
                     />
                 </TableCell>
+                <TableCell align="center" sx={{ width: 80, fontSize: '0.875rem', color: 'text.secondary' }}>
+                    {fixture.actual_home_score != null && fixture.actual_away_score != null
+                        ? `${fixture.actual_home_score}–${fixture.actual_away_score}`
+                        : '–'}
+                </TableCell>
                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDayTime(fixture_date)}</TableCell>
                 <TableCell align="center" sx={{ width: 140, fontSize: '0.875rem', color: 'text.secondary' }}>
                     {!gameStarted && allowAskAi && (

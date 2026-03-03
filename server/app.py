@@ -1050,6 +1050,21 @@ def repair_fixture_completed():
         return make_response({'error': str(e)}, 500)
 
 
+@app.route('/api/v1/fixtures/dedupe', methods=['POST'])
+def dedupe_fixtures_api():
+    """Remove duplicate fixtures (same competition, round, normalized home/away). Use after migrating from Pulselive to football-data.
+    Requires auth. Returns { removed: N }."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'Authentication required'}, 401)
+        deleted = _dedupe_fixtures()
+        return make_response({'removed': deleted, 'message': f'Removed {deleted} duplicate fixture(s).'}, 200)
+    except Exception as e:
+        db.session.rollback()
+        return make_response({'error': str(e)}, 500)
+
+
 # ESPN does not expose matchday/week on each event. Leagues play N matches per round; we assign round by sorted date.
 # Cap events so we don't get extra "rounds" from cup/other competitions (e.g. Ligue 1 calendar can include 80+ dates).
 ESPN_MATCHES_PER_ROUND = {
@@ -1440,6 +1455,17 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
                             _normalize_team_name_for_match(c.fixture_away_team) == norm_away):
                         existing = c
                         break
+                # Legacy Pulselive fixtures may have competition_slug NULL or ''; match so we update instead of duplicating
+                if not existing and competition_slug == 'eng.1':
+                    legacy = Fixture.query.filter(
+                        or_(Fixture.competition_slug.is_(None), Fixture.competition_slug == ''),
+                        Fixture.fixture_round == fixture_round,
+                    ).all()
+                    for c in legacy:
+                        if (_normalize_team_name_for_match(c.fixture_home_team) == norm_home and
+                                _normalize_team_name_for_match(c.fixture_away_team) == norm_away):
+                            existing = c
+                            break
         if existing:
             existing.fixture_round = fixture_round
             if fixture_date:
@@ -1449,6 +1475,7 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
             existing.is_completed = is_completed
             if external_id:
                 existing.external_id = external_id
+            existing.competition_slug = competition_slug
             fixtures_updated += 1
         else:
             new_f = Fixture(
@@ -3954,35 +3981,41 @@ def run_migrations():
         return make_response({'error': str(e), 'details': error_details.split('\n')[-5:]}, 500)
 
 
+def _dedupe_fixtures():
+    """Remove duplicate fixtures (same competition, round, normalized home/away). Keeps one per match.
+    Prefer keeping the row with external_id set (football-data/ESPN id); else keep smallest id.
+    Returns number of duplicate rows removed."""
+    fixtures = Fixture.query.all()
+    groups = {}
+    for f in fixtures:
+        comp = getattr(f, 'competition_slug', None) or ''
+        rnd = getattr(f, 'fixture_round', None)
+        norm_h = _normalize_team_name_for_match(getattr(f, 'fixture_home_team', None) or '')
+        norm_a = _normalize_team_name_for_match(getattr(f, 'fixture_away_team', None) or '')
+        key = (comp, rnd, norm_h, norm_a)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(f)
+    deleted = 0
+    for key, group in groups.items():
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda x: (0 if (getattr(x, 'external_id', None) or '').strip() else 1, x.id))
+        for dup in group[1:]:
+            db.session.delete(dup)
+            deleted += 1
+    if deleted:
+        db.session.commit()
+    return deleted
+
+
 # CLI: dedupe fixtures by (competition_slug, round, normalized home/away); keeps one row per match
 @app.cli.command('dedupe-fixtures')
 def dedupe_fixtures_cmd():
     """Remove duplicate fixtures (same competition, round, normalized home/away). Keeps one per match. Run from server dir: flask dedupe-fixtures."""
     with app.app_context():
-        fixtures = Fixture.query.all()
-        # group key: (competition_slug, fixture_round, norm_home, norm_away)
-        groups = {}
-        for f in fixtures:
-            comp = getattr(f, 'competition_slug', None) or ''
-            rnd = getattr(f, 'fixture_round', None)
-            norm_h = _normalize_team_name_for_match(getattr(f, 'fixture_home_team', None) or '')
-            norm_a = _normalize_team_name_for_match(getattr(f, 'fixture_away_team', None) or '')
-            key = (comp, rnd, norm_h, norm_a)
-            if key not in groups:
-                groups[key] = []
-            groups[key].append(f)
-        deleted = 0
-        for key, group in groups.items():
-            if len(group) <= 1:
-                continue
-            # Keep one: prefer row with external_id, else smallest id
-            group.sort(key=lambda x: (0 if (getattr(x, 'external_id', None) or '').strip() else 1, x.id))
-            keep = group[0]
-            for dup in group[1:]:
-                db.session.delete(dup)
-                deleted += 1
+        deleted = _dedupe_fixtures()
         if deleted:
-            db.session.commit()
             print(f"Dedupe complete: removed {deleted} duplicate fixture(s).")
         else:
             print("No duplicate fixtures found.")
