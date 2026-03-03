@@ -259,7 +259,14 @@ function Members() {
         setSyncing(true)
         setSyncMessage(null)
         authenticatedFetch(url, { method: 'GET' })
-            .then(res => (res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') })))
+            .then(res => {
+                if (res.status === 404) {
+                    const e = new Error('Refresh scores not available')
+                    e.status = 404
+                    throw e
+                }
+                return res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') })
+            })
             .then(data => {
                 if (data && data.error) throw new Error(data.error)
                 const updated = data.fixtures_updated ?? data.updated ?? 0
@@ -277,7 +284,10 @@ function Members() {
                 if (leagueId) loadCurrentRoundAndFixtures()
             })
             .catch(err => {
-                setSyncMessage({ type: 'error', text: err.message || 'Failed to refresh scores.' })
+                const msg = err.status === 404
+                    ? 'Refresh scores is not available on this server. Deploy the latest backend (with /api/v1/fixtures/sync-scores) to enable it.'
+                    : (err.message || 'Failed to refresh scores.')
+                setSyncMessage({ type: 'error', text: msg })
             })
             .finally(() => {
                 setSyncing(false)

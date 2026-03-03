@@ -618,11 +618,15 @@ SUPPORTED_COMPETITIONS = [
 
 
 def _fixture_query_competition(competition_slug):
-    """Return base query filter for fixtures by competition. None = all; 'eng.1' includes legacy null."""
+    """Return base query filter for fixtures by competition. None = all; 'eng.1' includes legacy null and empty string."""
     if not competition_slug:
         return None
     if competition_slug == 'eng.1':
-        return or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None))
+        return or_(
+            Fixture.competition_slug == 'eng.1',
+            Fixture.competition_slug.is_(None),
+            Fixture.competition_slug == '',
+        )
     return Fixture.competition_slug == competition_slug
 
 
@@ -2670,9 +2674,9 @@ def sync_fixture_scores():
                 if matches_with_scores <= 3:
                     print(f"DEBUG sync-scores: Match {idx} has scores: {home_team} {actual_home_score}-{actual_away_score} {away_team}, is_completed={is_completed}")
             
-            # Find matching fixture in database - Premier League only (competition_slug eng.1 or null), then normalized name match
+            # Find matching fixture in database - Premier League only (eng.1, null, and '' via shared filter)
             fixture = None
-            pl_filter = or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None))
+            pl_filter = _fixture_query_competition('eng.1')
             fixture = Fixture.query.filter(pl_filter).filter_by(
                 fixture_home_team=home_team,
                 fixture_away_team=away_team
