@@ -2316,12 +2316,13 @@ Predict the full-time score. Consider table position, form, and home advantage. 
         return make_response({'error': str(e)}, 500)
 
 
-@app.route('/api/v1/fixtures/sync-scores', methods=['POST'])
+@app.route('/api/v1/fixtures/sync-scores', methods=['POST', 'GET'])
 def sync_fixture_scores():
     """
     Sync completed fixtures with actual scores.
-    - Premier League: use api_url (pulselive API) in body or EXTERNAL_FIXTURES_API_URL.
+    - Premier League: use api_url (pulselive API) in body/query or EXTERNAL_FIXTURES_API_URL.
     - Other leagues: pass competition=slug (e.g. ger.1, eng.2); uses football-data.org or ESPN to refresh scores.
+    GET: use query params competition= and optionally api_url= (for PL).
     """
     print("DEBUG sync-scores: Function called")
     try:
@@ -2329,10 +2330,13 @@ def sync_fixture_scores():
             return make_response({
                 'error': 'Requests module is not available. Please run the server with pipenv: pipenv run python app.py'
             }, 500)
-        
-        data = request.get_json() or {}
-        competition_slug = (data.get('competition') or data.get('league_slug') or '').strip()
-        api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+        if request.method == 'GET':
+            competition_slug = (request.args.get('competition') or request.args.get('league_slug') or '').strip()
+            api_url = request.args.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+        else:
+            data = request.get_json() or {}
+            competition_slug = (data.get('competition') or data.get('league_slug') or '').strip()
+            api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
         
         # Non-Premier League: run fixture sync for that competition (updates scores from football-data or ESPN)
         if competition_slug and competition_slug != 'eng.1':
@@ -2367,8 +2371,11 @@ def sync_fixture_scores():
             return make_response({'error': f'Unknown competition: {competition_slug}'}, 400)
         
         if not api_url:
+            # Default Premier League pulselive URL when no competition or eng.1 (e.g. GET ?competition=eng.1)
+            api_url = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
+        if not api_url:
             return make_response({
-                'error': 'Provide api_url (Premier League) or competition=slug (e.g. ger.1, eng.2) in request body.'
+                'error': 'Provide api_url (Premier League) or competition=slug (e.g. ger.1, eng.2) in request body or query.'
             }, 400)
         
         # Force a higher limit and fetch all pages

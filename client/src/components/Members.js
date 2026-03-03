@@ -253,16 +253,12 @@ function Members() {
     function refreshScores() {
         if (!leagueId && !effectiveCompetition) return
         const isPremierLeague = effectiveCompetition === 'eng.1'
-        const syncBody = isPremierLeague
-            ? { api_url: SYNC_SCORES_API_URL }
-            : { competition: effectiveCompetition }
+        const params = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
+        if (isPremierLeague) params.set('api_url', SYNC_SCORES_API_URL)
+        const url = apiUrl('/api/v1/fixtures/sync-scores') + '?' + params.toString()
         setSyncing(true)
         setSyncMessage(null)
-        authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(syncBody)
-        })
+        authenticatedFetch(url, { method: 'GET' })
             .then(res => (res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') })))
             .then(data => {
                 if (data && data.error) throw new Error(data.error)
@@ -346,12 +342,9 @@ function Members() {
             // After syncing fixture list, pull in latest scores for this league
             try {
                 const isPL = effectiveCompetition === 'eng.1'
-                const scoreBody = isPL ? { api_url: SYNC_SCORES_API_URL } : { competition: effectiveCompetition }
-                const scoreRes = await authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(scoreBody)
-                })
+                const scoreParams = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
+                if (isPL) scoreParams.set('api_url', SYNC_SCORES_API_URL)
+                const scoreRes = await authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores') + '?' + scoreParams.toString(), { method: 'GET' })
                 const scoreData = await (scoreRes.ok ? scoreRes.json() : scoreRes.json().then(() => ({})))
                 const scoreUpdated = scoreData.fixtures_updated ?? scoreData.updated ?? 0
                 if (scoreUpdated > 0) text += ` Scores updated: ${scoreUpdated} fixture(s).`
