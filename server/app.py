@@ -2038,9 +2038,8 @@ class PredictionsResource(Resource):
                         'actual_home_score': fixture.actual_home_score,
                         'actual_away_score': fixture.actual_away_score
                     }
-                    # When fixture is completed with scores, ensure game_result is set (compute and persist if missing)
-                    if (fixture.is_completed and fixture.actual_home_score is not None and
-                            fixture.actual_away_score is not None and
+                    # When fixture has both scores, ensure game_result is set (for Results table and display)
+                    if (fixture.actual_home_score is not None and fixture.actual_away_score is not None and
                             game.home_team_score is not None and game.away_team_score is not None):
                         if not game.game_result:
                             pred_home = game.home_team_score

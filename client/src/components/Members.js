@@ -772,7 +772,8 @@ function Members() {
                                     const selectedRound = parseInt(gameWeek, 10)
                                     const roundMatch = (p) => {
                                         const r = p.fixture.round ?? p.fixture.fixture_round
-                                        return r != null && Number(r) === selectedRound
+                                        if (r == null) return false
+                                        return Number(r) === selectedRound
                                     }
                                     const competitionMatch = (p) => {
                                         if (!effectiveCompetition) return true
@@ -781,10 +782,12 @@ function Members() {
                                         if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
                                         return slug === effectiveCompetition
                                     }
+                                    const hasBothScores = (p) =>
+                                        p.fixture.actual_home_score != null && p.fixture.actual_away_score != null
                                     const completedPredictions = predictions
                                         .filter(p => {
                                             if (!p.fixture) return false
-                                            if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
+                                            if (!hasBothScores(p)) return false
                                             return roundMatch(p) && competitionMatch(p)
                                         })
                                         .sort((a, b) => {
@@ -799,9 +802,20 @@ function Members() {
                                             </Typography>
                                         )
                                     }
-                                    const wins = completedPredictions.filter(p => p.game_result === 'Win').length
-                                    const draws = completedPredictions.filter(p => p.game_result === 'Draw').length
-                                    const losses = completedPredictions.filter(p => p.game_result === 'Loss').length
+                                    const getDisplayResult = (p) => {
+                                        if (p.game_result) return p.game_result
+                                        const f = p.fixture
+                                        if (f?.actual_home_score == null || f?.actual_away_score == null || p.home_team_score == null || p.away_team_score == null) return null
+                                        const predSame = Number(p.home_team_score) === Number(f.actual_home_score) && Number(p.away_team_score) === Number(f.actual_away_score)
+                                        if (predSame) return 'Win'
+                                        const ph = Number(p.home_team_score), pa = Number(p.away_team_score), ah = Number(f.actual_home_score), aa = Number(f.actual_away_score)
+                                        const predW = ph > pa ? 'home' : (pa > ph ? 'away' : 'draw')
+                                        const actW = ah > aa ? 'home' : (aa > ah ? 'away' : 'draw')
+                                        return predW === actW ? 'Draw' : 'Loss'
+                                    }
+                                    const wins = completedPredictions.filter(p => getDisplayResult(p) === 'Win').length
+                                    const draws = completedPredictions.filter(p => getDisplayResult(p) === 'Draw').length
+                                    const losses = completedPredictions.filter(p => getDisplayResult(p) === 'Loss').length
                                     return (
                                         <>
                                             <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -811,17 +825,18 @@ function Members() {
                                             </Box>
                                             <Box>
                                                 {completedPredictions.map((prediction) => {
-                                                    const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
+                                                    const { fixture, home_team, away_team, home_team_score, away_team_score } = prediction
+                                                    const displayResult = getDisplayResult(prediction)
                                                     let resultColor = 'default'
-                                                    if (game_result === 'Win') resultColor = 'success'
-                                                    else if (game_result === 'Draw') resultColor = 'warning'
-                                                    else if (game_result === 'Loss') resultColor = 'error'
+                                                    if (displayResult === 'Win') resultColor = 'success'
+                                                    else if (displayResult === 'Draw') resultColor = 'warning'
+                                                    else if (displayResult === 'Loss') resultColor = 'error'
                                                     return (
                                                         <Card key={prediction.id} sx={{ mb: 1.5 }}>
                                                             <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                                                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                                                    <Typography variant="subtitle2">{fixture?.round ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
-                                                                    <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
+                                                                    <Typography variant="subtitle2">{fixture?.round != null ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
+                                                                    <Chip label={displayResult || 'Pending'} color={resultColor} size="small" />
                                                                 </Box>
                                                                 <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
                                                                     {home_team} vs {away_team}
@@ -1160,7 +1175,8 @@ function Members() {
                                 const selectedRound = parseInt(gameWeek, 10)
                                 const roundMatch = (p) => {
                                     const r = p.fixture.round ?? p.fixture.fixture_round
-                                    return r != null && Number(r) === selectedRound
+                                    if (r == null) return false
+                                    return Number(r) === selectedRound
                                 }
                                 const competitionMatch = (p) => {
                                     if (!effectiveCompetition) return true
@@ -1169,10 +1185,12 @@ function Members() {
                                     if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
                                     return slug === effectiveCompetition
                                 }
+                                const hasBothScores = (p) =>
+                                    p.fixture.actual_home_score != null && p.fixture.actual_away_score != null
                                 const completedPredictions = predictions
                                     .filter(p => {
                                         if (!p.fixture) return false
-                                        if (!p.fixture.is_completed || p.fixture.actual_home_score === null || p.fixture.actual_away_score === null) return false
+                                        if (!hasBothScores(p)) return false
                                         return roundMatch(p) && competitionMatch(p)
                                     })
                                     .sort((a, b) => {
@@ -1189,9 +1207,20 @@ function Members() {
                                     )
                                 }
 
-                                const wins = completedPredictions.filter(p => p.game_result === 'Win').length
-                                const draws = completedPredictions.filter(p => p.game_result === 'Draw').length
-                                const losses = completedPredictions.filter(p => p.game_result === 'Loss').length
+                                const getDisplayResult = (p) => {
+                                    if (p.game_result) return p.game_result
+                                    const f = p.fixture
+                                    if (f?.actual_home_score == null || f?.actual_away_score == null || p.home_team_score == null || p.away_team_score == null) return null
+                                    const predSame = Number(p.home_team_score) === Number(f.actual_home_score) && Number(p.away_team_score) === Number(f.actual_away_score)
+                                    if (predSame) return 'Win'
+                                    const ph = Number(p.home_team_score), pa = Number(p.away_team_score), ah = Number(f.actual_home_score), aa = Number(f.actual_away_score)
+                                    const predW = ph > pa ? 'home' : (pa > ph ? 'away' : 'draw')
+                                    const actW = ah > aa ? 'home' : (aa > ah ? 'away' : 'draw')
+                                    return predW === actW ? 'Draw' : 'Loss'
+                                }
+                                const wins = completedPredictions.filter(p => getDisplayResult(p) === 'Win').length
+                                const draws = completedPredictions.filter(p => getDisplayResult(p) === 'Draw').length
+                                const losses = completedPredictions.filter(p => getDisplayResult(p) === 'Loss').length
 
                                 return (
                                     <>
@@ -1202,17 +1231,18 @@ function Members() {
                                         </Box>
                                         <Box>
                                             {completedPredictions.map((prediction) => {
-                                                const { fixture, home_team, away_team, home_team_score, away_team_score, game_result } = prediction
+                                                const { fixture, home_team, away_team, home_team_score, away_team_score } = prediction
+                                                const displayResult = getDisplayResult(prediction)
                                                 let resultColor = 'default'
-                                                if (game_result === 'Win') resultColor = 'success'
-                                                else if (game_result === 'Draw') resultColor = 'warning'
-                                                else if (game_result === 'Loss') resultColor = 'error'
+                                                if (displayResult === 'Win') resultColor = 'success'
+                                                else if (displayResult === 'Draw') resultColor = 'warning'
+                                                else if (displayResult === 'Loss') resultColor = 'error'
                                                 return (
                                                     <Card key={prediction.id} sx={{ mb: 1.5 }}>
                                                         <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                                                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                                                <Typography variant="subtitle2">{fixture?.round ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
-                                                                <Chip label={game_result || 'Pending'} color={resultColor} size="small" />
+                                                                <Typography variant="subtitle2">{fixture?.round != null ? weekOrDayTitle(fixture.round) : 'N/A'}</Typography>
+                                                                <Chip label={displayResult || 'Pending'} color={resultColor} size="small" />
                                                             </Box>
                                                             <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
                                                                 {home_team} vs {away_team}
