@@ -1917,14 +1917,59 @@ def sync_fixtures():
         # Return JSON error response
         return make_response({'error': str(e), 'type': type(e).__name__, 'details': error_details.split('\n')[-5:]}, 500)
 
+def _fixture_for_game(game, competition_slug=None):
+    """Find the fixture matching a game's home/away teams. If competition_slug is given (e.g. from
+    league context), prefer the fixture in that competition so Championship vs Premier League
+    fixtures are resolved correctly."""
+    base = Fixture.query.filter_by(
+        fixture_home_team=game.home_team,
+        fixture_away_team=game.away_team
+    )
+    if competition_slug:
+        if competition_slug == 'eng.1':
+            base = base.filter(or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None)))
+        else:
+            base = base.filter(Fixture.competition_slug == competition_slug)
+    fixture = base.first()
+    if not fixture and competition_slug:
+        # Fallback: same teams without competition filter (e.g. only one such fixture exists)
+        fixture = Fixture.query.filter_by(
+            fixture_home_team=game.home_team,
+            fixture_away_team=game.away_team
+        ).first()
+    if not fixture:
+        all_fixtures = Fixture.query.all()
+        for f in all_fixtures:
+            if (f.fixture_home_team and f.fixture_away_team and
+                f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
+                f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
+                if not competition_slug or (competition_slug == 'eng.1' and (f.competition_slug == 'eng.1' or f.competition_slug is None)) or f.competition_slug == competition_slug:
+                    return f
+        for f in all_fixtures:
+            if (f.fixture_home_team and f.fixture_away_team and
+                f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
+                f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
+                return f
+    return fixture
+
+
 class PredictionsResource(Resource):
     def get(self):
-        """Get all predictions for the current user with their results"""
+        """Get all predictions for the current user with their results.
+        Optional query: ?league_id= to resolve fixtures in that league's competition (fixes
+        Championship etc. so completed predictions show for the correct competition)."""
         try:
             user_id = get_current_user_id()
             
             if not user_id:
                 return make_response({'error': 'User not authenticated'}, 401)
+            
+            competition_slug = None
+            league_id = request.args.get('league_id', type=int)
+            if league_id:
+                league = League.query.get(league_id)
+                if league and getattr(league, 'competition_slug', None):
+                    competition_slug = league.competition_slug
             
             # Get all user's predictions, sorted by date (oldest first)
             user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.asc()).all()
@@ -1934,21 +1979,7 @@ class PredictionsResource(Resource):
             fixtures_completed = 0
             
             for game in user_games:
-                # Find matching fixture to get actual scores - try exact match first
-                fixture = Fixture.query.filter_by(
-                    fixture_home_team=game.home_team,
-                    fixture_away_team=game.away_team
-                ).first()
-                
-                # If not found, try case-insensitive match
-                if not fixture:
-                    all_fixtures = Fixture.query.all()
-                    for f in all_fixtures:
-                        if (f.fixture_home_team and f.fixture_away_team and 
-                            f.fixture_home_team.lower().strip() == game.home_team.lower().strip() and
-                            f.fixture_away_team.lower().strip() == game.away_team.lower().strip()):
-                            fixture = f
-                            break
+                fixture = _fixture_for_game(game, competition_slug)
                 
                 prediction_data = game.to_dict()
                 

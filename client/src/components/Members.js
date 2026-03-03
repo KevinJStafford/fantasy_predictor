@@ -330,7 +330,8 @@ function Members() {
 
     function getPredictions() {
         setLoadingPredictions(true)
-        authenticatedFetch('/api/v1/predictions')
+        const url = leagueId ? `/api/v1/predictions?league_id=${leagueId}` : '/api/v1/predictions'
+        authenticatedFetch(url)
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to fetch predictions')
@@ -572,11 +573,12 @@ function Members() {
         if (!leagueId) loadCurrentRoundAndFixtures()
     }, [])
 
-    // When league is selected, refresh default game week after league detail (and thus competition_slug) is loaded
+    // When league is selected, refresh default game week and predictions (with league_id so fixture resolution uses correct competition)
     useEffect(() => {
         if (leagueId && leagueDetail?.id === leagueId) {
             loadCurrentRoundAndFixtures()
             getAvailableRounds()
+            getPredictions()
         }
     }, [leagueId, leagueDetail])
 
