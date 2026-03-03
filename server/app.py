@@ -3528,7 +3528,7 @@ def _fixture_date_on_or_after_league(fixture, game, league_created_at):
     elif game and getattr(game, 'game_week', None) is not None:
         dt = game.game_week
     if dt is None:
-        return False
+        return True  # include when date unknown so we don't exclude valid games from scoring
     # Normalize for comparison (naive vs aware)
     try:
         if dt.tzinfo is None and league_created_at.tzinfo:
@@ -3681,6 +3681,8 @@ def get_league_leaderboard(league_id):
             # Optional ?round=N: show leaderboard for that week (e.g. user selected week from dropdown)
             requested_round = request.args.get('round', type=int)
             display_round = requested_round if requested_round is not None else current_round
+            if display_round is not None:
+                display_round = int(display_round)
             weeks_won_map = {}
             for w in LeagueWeekWinner.query.filter_by(league_id=league_id).all():
                 weeks_won_map[w.user_id] = weeks_won_map.get(w.user_id, 0) + 1
@@ -3696,7 +3698,14 @@ def get_league_leaderboard(league_id):
                         'weeks_won': weeks_won_map.get(lm.user.id, 0),
                     })
             else:
-                round_fixtures = [f for f in completed_fixtures if f.fixture_round == display_round]
+                def _round_eq(f, r):
+                    if f is None or r is None:
+                        return False
+                    try:
+                        return int(f) == int(r)
+                    except (TypeError, ValueError):
+                        return False
+                round_fixtures = [f for f in completed_fixtures if _round_eq(f.fixture_round, display_round)]
                 leaderboard = []
                 for lm in league.league_memberships:
                     if lm.user.deleted_at:
@@ -3705,7 +3714,7 @@ def get_league_leaderboard(league_id):
                     games = Game.query.filter_by(user_id=lm.user.id).all()
                     for g in games:
                         fixture = _fixture_for_game(g, league_competition_slug)
-                        if not fixture or fixture.fixture_round != display_round or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
+                        if not fixture or not _round_eq(fixture.fixture_round, display_round) or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
                             continue
                         res = _result_for_game(g, fixture)
                         if res == 'Win':
@@ -3717,7 +3726,7 @@ def get_league_leaderboard(league_id):
                     rounds_with_pick = set()
                     for g in games:
                         fx = _fixture_for_game(g, league_competition_slug)
-                        if fx and fx.fixture_round == display_round and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
+                        if fx and _round_eq(fx.fixture_round, display_round) and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                             rounds_with_pick.add(fx.fixture_round)
                     for f in round_fixtures:
                         if f.fixture_round not in rounds_with_pick:
