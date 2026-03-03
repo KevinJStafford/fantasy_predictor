@@ -562,10 +562,11 @@ function Members() {
             .finally(() => setLoadingAdminFixtures(false))
     }
 
-    // Load available rounds and predictions on mount
+    // Load available rounds and predictions on mount (skip predictions if league in URL - league effect will fetch with league_id to avoid race)
     useEffect(() => {
         getAvailableRounds()
-        getPredictions()
+        const hasLeagueInUrl = /\bleague=\d+/.test(location.search)
+        if (!hasLeagueInUrl) getPredictions()
     }, [])
 
     // When not viewing a league, load current round once on mount (league view uses effect below)
@@ -775,6 +776,7 @@ function Members() {
                                     }
                                     const competitionMatch = (p) => {
                                         if (!effectiveCompetition) return true
+                                        if (!leagueDetail?.competition_slug) return true
                                         const slug = p.fixture.competition_slug
                                         if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
                                         return slug === effectiveCompetition
@@ -1162,6 +1164,7 @@ function Members() {
                                 }
                                 const competitionMatch = (p) => {
                                     if (!effectiveCompetition) return true
+                                    if (!leagueDetail?.competition_slug) return true
                                     const slug = p.fixture.competition_slug
                                     if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
                                     return slug === effectiveCompetition
