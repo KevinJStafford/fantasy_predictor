@@ -150,26 +150,17 @@ function Members() {
             .catch(() => {})
 
         if (!isAdmin) return
-        // Admin: refresh scores. Premier League uses sync-scores (pulselive); other leagues use fixture sync (football-data.org / ESPN) which updates scores too.
-        const comp = competitions.find(c => c.slug === effectiveCompetition)
-        const isFootballData = (comp && comp.source === 'football_data') || ['ger.1', 'ita.1', 'uefa.cl', 'fifa.world', 'eng.2'].includes(effectiveCompetition)
-        const isEspn = comp && comp.source === 'espn'
+        // Admin: refresh scores. All leagues use sync-scores: PL with api_url, others with competition=slug (backend runs football-data or ESPN sync).
         const isPremierLeague = effectiveCompetition === 'eng.1'
-        const syncBody = !isPremierLeague
-            ? (isFootballData
-                ? { source: 'football_data', league_slug: comp?.slug || effectiveCompetition, competition: comp?.slug || effectiveCompetition }
-                : isEspn
-                    ? { source: 'espn', league_slug: comp?.espn_slug || comp?.slug || effectiveCompetition }
-                    : { api_url: comp?.api_url || SYNC_SCORES_API_URL })
-            : { api_url: SYNC_SCORES_API_URL }
+        const syncBody = isPremierLeague
+            ? { api_url: SYNC_SCORES_API_URL }
+            : { competition: effectiveCompetition }
         setSyncing(true)
-        const syncPromise = isPremierLeague
-            ? authenticatedFetch('/api/v1/fixtures/sync-scores', { method: 'POST', body: JSON.stringify(syncBody) })
-            : authenticatedFetch(apiUrl('/api/v1/fixtures/sync'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(syncBody)
-              })
+        const syncPromise = authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(syncBody)
+        })
         syncPromise
             .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
             .then(data => {

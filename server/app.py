@@ -1374,8 +1374,22 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
         full_time = score.get('fullTime') if isinstance(score, dict) else None
         home_score = away_score = None
         if isinstance(full_time, dict):
-            home_score = full_time.get('homeTeam')
-            away_score = full_time.get('awayTeam')
+            home_score = full_time.get('homeTeam') or full_time.get('home')
+            away_score = full_time.get('awayTeam') or full_time.get('away')
+            if home_score is not None:
+                try:
+                    home_score = int(home_score)
+                except (TypeError, ValueError):
+                    home_score = None
+            if away_score is not None:
+                try:
+                    away_score = int(away_score)
+                except (TypeError, ValueError):
+                    away_score = None
+        if home_score is None and away_score is None and isinstance(score.get('regularTime'), dict):
+            rt = score['regularTime']
+            home_score = rt.get('homeTeam') or rt.get('home')
+            away_score = rt.get('awayTeam') or rt.get('away')
             if home_score is not None:
                 try:
                     home_score = int(home_score)
@@ -2293,11 +2307,9 @@ Predict the full-time score. Consider table position, form, and home advantage. 
 @app.route('/api/v1/fixtures/sync-scores', methods=['POST'])
 def sync_fixture_scores():
     """
-    Sync completed fixtures with actual scores from the Premier League (pulselive) API.
-    Updates fixtures that have been played with their actual scores.
-    For non-Premier League (Bundesliga, World Cup, etc.), scores are updated when running
-    fixture sync (POST /api/v1/fixtures/sync) with the league's source; the client triggers
-    that sync on admin page load for non-PL leagues.
+    Sync completed fixtures with actual scores.
+    - Premier League: use api_url (pulselive API) in body or EXTERNAL_FIXTURES_API_URL.
+    - Other leagues: pass competition=slug (e.g. ger.1, eng.2); uses football-data.org or ESPN to refresh scores.
     """
     print("DEBUG sync-scores: Function called")
     try:
@@ -2307,10 +2319,45 @@ def sync_fixture_scores():
             }, 500)
         
         data = request.get_json() or {}
+        competition_slug = (data.get('competition') or data.get('league_slug') or '').strip()
         api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
         
+        # Non-Premier League: run fixture sync for that competition (updates scores from football-data or ESPN)
+        if competition_slug and competition_slug != 'eng.1':
+            comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == competition_slug), None)
+            if comp and comp.get('source') == 'football_data':
+                added, updated, seen, err = _sync_fixtures_football_data(
+                    comp.get('football_data_code') or 'BL1',
+                    competition_slug
+                )
+                if err:
+                    return make_response({'error': err}, 500)
+                db.session.commit()
+                return make_response({
+                    'message': f'Scores synced for {competition_slug} (football-data.org)',
+                    'added': added,
+                    'updated': updated,
+                    'fixtures_seen': seen,
+                }, 200)
+            if comp and comp.get('source') == 'espn':
+                added, updated, seen, err = _sync_fixtures_espn(comp.get('espn_slug') or competition_slug)
+                if err:
+                    return make_response({'error': err}, 500)
+                db.session.commit()
+                return make_response({
+                    'message': f'Scores synced for {competition_slug} (ESPN)',
+                    'added': added,
+                    'updated': updated,
+                    'fixtures_seen': seen,
+                }, 200)
+            if comp:
+                return make_response({'error': f'Unknown sync source for {competition_slug}'}, 400)
+            return make_response({'error': f'Unknown competition: {competition_slug}'}, 400)
+        
         if not api_url:
-            return make_response({'error': 'API URL is required. Provide api_url in request body or set EXTERNAL_FIXTURES_API_URL environment variable.'}, 400)
+            return make_response({
+                'error': 'Provide api_url (Premier League) or competition=slug (e.g. ger.1, eng.2) in request body.'
+            }, 400)
         
         # Force a higher limit and fetch all pages
         effective_api_url = api_url
