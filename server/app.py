@@ -129,6 +129,18 @@ def _verify_password(user_id, password_str):
         return False
 
 
+def _is_dev_origin(origin):
+    """True if origin is a common development host (localhost / 127.0.0.1)."""
+    if not origin or not isinstance(origin, str):
+        return False
+    try:
+        parsed = urlparse(origin)
+        host = (parsed.hostname or '').lower()
+        return host in ('localhost', '127.0.0.1')
+    except Exception:
+        return False
+
+
 @app.after_request
 def add_cors_headers_if_missing(response):
     """Ensure all required CORS headers are on every response (fixes 'missing allow header' on login etc)."""
@@ -137,7 +149,8 @@ def add_cors_headers_if_missing(response):
         if not origin:
             return response
         allowed = app.config.get('CORS_ORIGINS_LIST') or []
-        if allowed and allowed != ['*'] and origin not in allowed:
+        # Skip adding headers only if we have a strict list and this origin isn't in it (and not a dev origin)
+        if allowed and '*' not in allowed and origin not in allowed and not _is_dev_origin(origin):
             return response
         # Add full set so preflight and actual requests both succeed
         if response.headers.get('Access-Control-Allow-Origin') is None:

@@ -138,7 +138,6 @@ function Members() {
     }, [effectiveCompetition])
 
     // On league page load: refresh results (check-results) for everyone; admins also refresh scores from the right source
-    const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
     useEffect(() => {
         if (!leagueId) return
         // Everyone: run check-results so W/D/L are up to date from current fixture data
@@ -151,6 +150,7 @@ function Members() {
 
         if (!isAdmin) return
         // Admin: refresh scores. All leagues use sync-scores: PL with api_url, others with competition=slug (backend runs football-data or ESPN sync).
+        const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
         const isPremierLeague = effectiveCompetition === 'eng.1'
         const syncBody = isPremierLeague
             ? { api_url: SYNC_SCORES_API_URL }
@@ -248,6 +248,47 @@ function Members() {
         })
     }
 
+    const SYNC_SCORES_API_URL = 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100'
+
+    function refreshScores() {
+        if (!leagueId && !effectiveCompetition) return
+        const isPremierLeague = effectiveCompetition === 'eng.1'
+        const syncBody = isPremierLeague
+            ? { api_url: SYNC_SCORES_API_URL }
+            : { competition: effectiveCompetition }
+        setSyncing(true)
+        setSyncMessage(null)
+        authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(syncBody)
+        })
+            .then(res => (res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') })))
+            .then(data => {
+                if (data && data.error) throw new Error(data.error)
+                const updated = data.fixtures_updated ?? data.updated ?? 0
+                const notFound = data.fixtures_not_found ?? 0
+                setSyncMessage({
+                    type: 'success',
+                    text: `Scores refreshed: ${updated} fixture(s) updated.${notFound ? ` ${notFound} API match(es) had no matching fixture.` : ''}`
+                })
+                return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+            })
+            .then(() => {
+                getPredictions()
+                fetchLeaderboard()
+                if (leagueId) getAvailableRounds()
+                if (leagueId) loadCurrentRoundAndFixtures()
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to refresh scores.' })
+            })
+            .finally(() => {
+                setSyncing(false)
+                setTimeout(() => setSyncMessage(null), 6000)
+            })
+    }
+
     function syncFixtures() {
         setSyncing(true)
         setSyncMessage(null)
@@ -260,7 +301,7 @@ function Members() {
         } else if (isEspn) {
             body = { source: 'espn', league_slug: comp.espn_slug || comp.slug }
         } else {
-            body = { api_url: (comp && comp.api_url) || 'https://sdp-prem-prod.premier-league-prod.pulselive.com/api/v2/matches?competition=8&season=2025&_limit=100' }
+            body = { api_url: (comp && comp.api_url) || SYNC_SCORES_API_URL }
         }
         fetch(apiUrl('/api/v1/fixtures/sync'), {
             method: 'POST',
@@ -282,31 +323,45 @@ function Members() {
             }
             return data
         })
-        .then(data => {
+        .then(async data => {
             if (data.error) {
                 setSyncMessage({ type: 'error', text: data.error })
-            } else {
-                const details = [
-                    data.added != null ? `added=${data.added}` : null,
-                    data.updated != null ? `updated=${data.updated}` : null,
-                    data.total_written != null ? `total=${data.total_written}` : null,
-                    data.window_start_utc && data.window_end_utc ? `window=${data.window_start_utc} → ${data.window_end_utc}` : null,
-                    data.fixtures_seen != null ? `seen=${data.fixtures_seen}` : null,
-                    data.fixtures_with_parsed_date != null ? `parsed_dates=${data.fixtures_with_parsed_date}` : null,
-                    data.fixtures_in_window != null ? `in_window=${data.fixtures_in_window}` : null,
-                    data.skipped_no_date != null ? `skipped_no_date=${data.skipped_no_date}` : null,
-                    data.skipped_outside_window != null ? `skipped_outside_window=${data.skipped_outside_window}` : null,
-                    data.parsed_min_date_utc ? `api_min=${data.parsed_min_date_utc}` : null,
-                    data.parsed_max_date_utc ? `api_max=${data.parsed_max_date_utc}` : null,
-                ].filter(Boolean).join(' | ')
-
-                setSyncMessage({
-                    type: 'success',
-                    text: `Sync complete. ${details}`
-                })
-                getAvailableRounds()
-                loadCurrentRoundAndFixtures()
+                return
             }
+            const details = [
+                data.added != null ? `added=${data.added}` : null,
+                data.updated != null ? `updated=${data.updated}` : null,
+                data.total_written != null ? `total=${data.total_written}` : null,
+                data.window_start_utc && data.window_end_utc ? `window=${data.window_start_utc} → ${data.window_end_utc}` : null,
+                data.fixtures_seen != null ? `seen=${data.fixtures_seen}` : null,
+                data.fixtures_with_parsed_date != null ? `parsed_dates=${data.fixtures_with_parsed_date}` : null,
+                data.fixtures_in_window != null ? `in_window=${data.fixtures_in_window}` : null,
+                data.skipped_no_date != null ? `skipped_no_date=${data.skipped_no_date}` : null,
+                data.skipped_outside_window != null ? `skipped_outside_window=${data.skipped_outside_window}` : null,
+                data.parsed_min_date_utc ? `api_min=${data.parsed_min_date_utc}` : null,
+                data.parsed_max_date_utc ? `api_max=${data.parsed_max_date_utc}` : null,
+            ].filter(Boolean).join(' | ')
+
+            let text = `Sync complete. ${details}`
+            // After syncing fixture list, pull in latest scores for this league
+            try {
+                const isPL = effectiveCompetition === 'eng.1'
+                const scoreBody = isPL ? { api_url: SYNC_SCORES_API_URL } : { competition: effectiveCompetition }
+                const scoreRes = await authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(scoreBody)
+                })
+                const scoreData = await (scoreRes.ok ? scoreRes.json() : scoreRes.json().then(() => ({})))
+                const scoreUpdated = scoreData.fixtures_updated ?? scoreData.updated ?? 0
+                if (scoreUpdated > 0) text += ` Scores updated: ${scoreUpdated} fixture(s).`
+                await authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' }).catch(() => {})
+                getPredictions()
+                fetchLeaderboard()
+            } catch (_) { /* non-fatal */ }
+            setSyncMessage({ type: 'success', text })
+            getAvailableRounds()
+            loadCurrentRoundAndFixtures()
         })
         .catch(error => {
             console.error('Error syncing fixtures:', error)
@@ -314,7 +369,6 @@ function Members() {
         })
         .finally(() => {
             setSyncing(false)
-            // Clear message after 5 seconds
             setTimeout(() => setSyncMessage(null), 5000)
         })
     }
@@ -636,6 +690,14 @@ function Members() {
                             disabled={syncing}
                         >
                             {syncing ? 'Syncing...' : 'Sync Fixtures'}
+                        </Button>
+                        <Button
+                            variant="outlined"
+                            color="primary"
+                            onClick={refreshScores}
+                            disabled={syncing}
+                        >
+                            Refresh scores
                         </Button>
                         <Button
                             variant="outlined"

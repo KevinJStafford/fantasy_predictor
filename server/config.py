@@ -76,6 +76,14 @@ if cors_origins:
     origins = [o.strip() for o in cors_origins.split(',') if o.strip()]
 else:
     origins = ['*']
+# Always allow common dev origins so localhost works even when CORS_ORIGINS is set for production
+_dev_origins = [
+    'http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173', 'https://localhost:3000', 'https://localhost:5173',
+]
+for o in _dev_origins:
+    if o not in origins:
+        origins.append(o)
 
 # Store for after_request fallback (so error responses still get CORS)
 app.config['CORS_ORIGINS_LIST'] = origins
