@@ -1919,8 +1919,9 @@ def sync_fixtures():
 
 def _fixture_for_game(game, competition_slug=None):
     """Find the fixture matching a game's home/away teams. If competition_slug is given (e.g. from
-    league context), prefer the fixture in that competition so Championship vs Premier League
-    fixtures are resolved correctly."""
+    league context), prefer the fixture in that competition so Championship/Bundesliga etc.
+    fixtures are resolved correctly. Uses normalized name matching (e.g. FC Bayern München vs
+    Bayern Munich) for leagues like Bundesliga."""
     base = Fixture.query.filter_by(
         fixture_home_team=game.home_team,
         fixture_away_team=game.away_team
@@ -1938,6 +1939,7 @@ def _fixture_for_game(game, competition_slug=None):
             fixture_away_team=game.away_team
         ).first()
     if not fixture:
+        # Case-insensitive exact match
         all_fixtures = Fixture.query.all()
         for f in all_fixtures:
             if (f.fixture_home_team and f.fixture_away_team and
@@ -1950,6 +1952,29 @@ def _fixture_for_game(game, competition_slug=None):
                 f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
                 f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
                 return f
+    if not fixture:
+        # Normalized match (umlauts, FC prefix, etc.) so Bundesliga "FC Bayern München" matches "Bayern Munich"
+        norm_home = _normalize_team_name_for_match(game.home_team or '')
+        norm_away = _normalize_team_name_for_match(game.away_team or '')
+        if norm_home and norm_away:
+            all_fixtures_list = Fixture.query.all()
+            if competition_slug:
+                if competition_slug == 'eng.1':
+                    candidates = [f for f in all_fixtures_list if f.competition_slug == 'eng.1' or f.competition_slug is None]
+                else:
+                    candidates = [f for f in all_fixtures_list if f.competition_slug == competition_slug]
+            else:
+                candidates = all_fixtures_list
+            for f in candidates:
+                if (f.fixture_home_team and f.fixture_away_team and
+                    _normalize_team_name_for_match(f.fixture_home_team) == norm_home and
+                    _normalize_team_name_for_match(f.fixture_away_team) == norm_away):
+                    return f
+            for f in all_fixtures_list:
+                if (f.fixture_home_team and f.fixture_away_team and
+                    _normalize_team_name_for_match(f.fixture_home_team) == norm_home and
+                    _normalize_team_name_for_match(f.fixture_away_team) == norm_away):
+                    return f
     return fixture
 
 
