@@ -152,7 +152,7 @@ function Members() {
         // Admin: refresh scores. All leagues (including Premier League eng.1) use competition=slug; backend uses football-data.org or ESPN.
         const syncBody = { competition: effectiveCompetition || 'eng.1' }
         setSyncing(true)
-        const syncPromise = authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores'), {
+        const syncPromise = authenticatedFetch('/api/v1/fixtures/sync-scores', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(syncBody)
@@ -247,10 +247,10 @@ function Members() {
     function refreshScores() {
         if (!leagueId && !effectiveCompetition) return
         const params = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
-        const url = apiUrl('/api/v1/fixtures/sync-scores') + '?' + params.toString()
+        const pathWithQuery = '/api/v1/fixtures/sync-scores?' + params.toString()
         setSyncing(true)
         setSyncMessage(null)
-        authenticatedFetch(url, { method: 'GET' })
+        authenticatedFetch(pathWithQuery, { method: 'GET' })
             .then(res => {
                 if (res.status === 404) {
                     const e = new Error('Refresh scores not available')
@@ -346,7 +346,7 @@ function Members() {
             // After syncing fixture list, pull in latest scores for this league (all use competition=slug)
             try {
                 const scoreParams = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
-                const scoreRes = await authenticatedFetch(apiUrl('/api/v1/fixtures/sync-scores') + '?' + scoreParams.toString(), { method: 'GET' })
+                const scoreRes = await authenticatedFetch('/api/v1/fixtures/sync-scores?' + scoreParams.toString(), { method: 'GET' })
                 const scoreData = await (scoreRes.ok ? scoreRes.json() : scoreRes.json().then(() => ({})))
                 const scoreUpdated = scoreData.fixtures_updated ?? scoreData.updated ?? 0
                 if (scoreUpdated > 0) text += ` Scores updated: ${scoreUpdated} fixture(s).`
