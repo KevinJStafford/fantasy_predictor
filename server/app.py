@@ -2498,6 +2498,20 @@ def sync_fixture_scores():
                     print(f"DEBUG sync-scores: Skipping match {idx} - missing team names: home={home_team}, away={away_team}")
                 continue
             
+            # Top-level score fields (some Premier League API responses use these)
+            if actual_home_score is None and actual_away_score is None:
+                for hkey, akey in [('home_team_score', 'away_team_score'), ('homeTeamScore', 'awayTeamScore'), ('homeScore', 'awayScore')]:
+                    h = match_data.get(hkey)
+                    a = match_data.get(akey)
+                    if h is not None and a is not None:
+                        try:
+                            actual_home_score = int(h)
+                            actual_away_score = int(a)
+                            scores_from_final_result = True
+                            break
+                        except (TypeError, ValueError):
+                            pass
+            
             # API has isCompleted field (top-level or nested under status) - use as primary indicator
             def _is_completed_true(val):
                 if val is True:
@@ -2636,53 +2650,49 @@ def sync_fixture_scores():
                 if matches_with_scores <= 3:
                     print(f"DEBUG sync-scores: Match {idx} has scores: {home_team} {actual_home_score}-{actual_away_score} {away_team}, is_completed={is_completed}")
             
-            # Find matching fixture in database - use case-insensitive matching
+            # Find matching fixture in database - Premier League only (competition_slug eng.1 or null), then normalized name match
             fixture = None
-            # Try exact match first
-            fixture = Fixture.query.filter_by(
+            pl_filter = or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None))
+            fixture = Fixture.query.filter(pl_filter).filter_by(
                 fixture_home_team=home_team,
                 fixture_away_team=away_team
             ).first()
-            
-            # If not found, try case-insensitive
             if not fixture:
-                all_fixtures = Fixture.query.all()
-                for f in all_fixtures:
-                    if (f.fixture_home_team and f.fixture_away_team and 
-                        f.fixture_home_team.lower().strip() == home_team.lower().strip() and
-                        f.fixture_away_team.lower().strip() == away_team.lower().strip()):
+                for f in Fixture.query.filter(pl_filter).all():
+                    if (f.fixture_home_team and f.fixture_away_team and
+                        f.fixture_home_team.lower().strip() == (home_team or '').lower().strip() and
+                        f.fixture_away_team.lower().strip() == (away_team or '').lower().strip()):
+                        fixture = f
+                        break
+            if not fixture:
+                for f in Fixture.query.filter(pl_filter).all():
+                    if _fixture_matches_game(f, home_team, away_team):
                         fixture = f
                         break
             
             if fixture:
-                # Debug: show what we found
                 if idx < 5:
                     print(f"DEBUG sync-scores: Match {idx} - Found fixture {fixture.id}: {home_team} vs {away_team}, period={match_data.get('period')}, is_completed={is_completed}, has_scores={actual_home_score is not None and actual_away_score is not None}")
                 
-                # Always update is_completed based on whether period is FullTime
-                # This ensures we reset incorrectly marked games
                 has_both_scores = actual_home_score is not None and actual_away_score is not None
-                if is_completed and has_both_scores:
-                    # Full-time result - update fixture with actual scores and mark as completed
+                if has_both_scores:
+                    # We have final scores - update fixture (treat as completed; API may not set period/status)
                     fixture.actual_home_score = int(actual_home_score)
                     fixture.actual_away_score = int(actual_away_score)
                     fixture.is_completed = True
                     fixtures_updated += 1
                     fixtures_with_scores += 1
-                    # Debug first few updates
                     if fixtures_updated <= 3:
-                        print(f"DEBUG sync-scores: Updated fixture {fixture.id}: {home_team} {actual_home_score}-{actual_away_score} {away_team}, marked as completed (FullTime)")
-                elif fixture.is_completed:
-                    # Game was previously marked as completed but period is NOT FullTime - reset it
-                    # Also clear scores since they're not final
-                    fixture.is_completed = False
-                    fixture.actual_home_score = None
-                    fixture.actual_away_score = None
-                    fixtures_updated += 1
-                    if idx < 5:
-                        print(f"DEBUG sync-scores: Reset fixture {fixture.id} is_completed to False and cleared scores (period is not FullTime): {home_team} vs {away_team}, period={match_data.get('period')}")
+                        print(f"DEBUG sync-scores: Updated fixture {fixture.id}: {home_team} {actual_home_score}-{actual_away_score} {away_team}, marked as completed")
+                elif is_completed and not has_both_scores and fixture.is_completed:
+                    # API says completed but we have no scores - clear if we had scores before (e.g. data glitch)
+                    if fixture.actual_home_score is not None or fixture.actual_away_score is not None:
+                        fixture.is_completed = False
+                        fixture.actual_home_score = None
+                        fixture.actual_away_score = None
+                        fixtures_updated += 1
                 elif idx < 5:
-                    print(f"DEBUG sync-scores: Match {idx} - Not updating fixture (is_completed={is_completed}, scores={actual_home_score}-{actual_away_score})")
+                    print(f"DEBUG sync-scores: Match {idx} - No scores yet (is_completed={is_completed}, scores={actual_home_score}-{actual_away_score})")
             else:
                 fixtures_not_found += 1
                 # Debug: print first few unmatched fixtures
