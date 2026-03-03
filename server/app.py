@@ -1053,13 +1053,16 @@ def repair_fixture_completed():
 @app.route('/api/v1/fixtures/dedupe', methods=['POST'])
 def dedupe_fixtures_api():
     """Remove duplicate fixtures (same competition, round, normalized home/away). Use after migrating from Pulselive to football-data.
-    Requires auth. Returns { removed: N }."""
+    Requires auth. Does not touch Game or Prediction; predictions stay because games are matched to fixtures by team names."""
     try:
         user_id = get_current_user_id()
         if not user_id:
             return make_response({'error': 'Authentication required'}, 401)
         deleted = _dedupe_fixtures()
-        return make_response({'removed': deleted, 'message': f'Removed {deleted} duplicate fixture(s).'}, 200)
+        return make_response({
+            'removed': deleted,
+            'message': f'Removed {deleted} duplicate fixture(s). Predictions unchanged (games matched to fixtures by team names).',
+        }, 200)
     except Exception as e:
         db.session.rollback()
         return make_response({'error': str(e)}, 500)
@@ -1974,11 +1977,28 @@ def sync_fixtures():
         # Return JSON error response
         return make_response({'error': str(e), 'type': type(e).__name__, 'details': error_details.split('\n')[-5:]}, 500)
 
-def _fixture_for_game(game, competition_slug=None):
+def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
     """Find the fixture matching a game's home/away teams. If competition_slug is given (e.g. from
     league context), prefer the fixture in that competition so Championship/Bundesliga etc.
     fixtures are resolved correctly. Uses normalized name matching (e.g. FC Bayern München vs
-    Bayern Munich) for leagues like Bundesliga."""
+    Bayern Munich) for leagues like Bundesliga.
+    Pass fixtures_list (e.g. Fixture.query.filter(...).all()) to avoid repeated DB scans when
+    resolving many games in a loop."""
+    # If we have a pre-loaded list, use it for all fallbacks (no DB hits in loop).
+    if fixtures_list is not None:
+        for f in fixtures_list:
+            if not _fixture_matches_game(f, game.home_team, game.away_team):
+                continue
+            if competition_slug:
+                if competition_slug == 'eng.1' and (f.competition_slug != 'eng.1' and f.competition_slug is not None):
+                    continue
+                if competition_slug != 'eng.1' and f.competition_slug != competition_slug:
+                    continue
+            return f
+        for f in fixtures_list:
+            if _fixture_matches_game(f, game.home_team, game.away_team):
+                return f
+        return None
     base = Fixture.query.filter_by(
         fixture_home_team=game.home_team,
         fixture_away_team=game.away_team
@@ -2056,12 +2076,16 @@ class PredictionsResource(Resource):
             # Get all user's predictions, sorted by date (oldest first)
             user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.asc()).all()
             
+            # Preload fixtures once to avoid N+1: each _fixture_for_game would otherwise do Fixture.query.all()
+            comp_filter = _fixture_query_competition(competition_slug) if competition_slug else None
+            all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all()
+            
             predictions = []
             fixtures_found = 0
             fixtures_completed = 0
             
             for game in user_games:
-                fixture = _fixture_for_game(game, competition_slug)
+                fixture = _fixture_for_game(game, competition_slug, fixtures_list=all_fixtures)
                 
                 prediction_data = game.to_dict()
                 
@@ -2497,6 +2521,8 @@ def sync_fixture_scores():
         
         print(f"DEBUG sync-scores: Processing {len(all_items)} matches from API")
         
+        pl_filter = _fixture_query_competition('eng.1')
+        pl_fixtures = Fixture.query.filter(pl_filter).all() if pl_filter else []
         for idx, match_data in enumerate(all_items):
             # Extract match information and scores (scores are nested in homeTeam/awayTeam)
             home_team = None
@@ -2701,20 +2727,14 @@ def sync_fixture_scores():
             
             # Find matching fixture in database - Premier League only (eng.1, null, and '' via shared filter)
             fixture = None
-            pl_filter = _fixture_query_competition('eng.1')
-            fixture = Fixture.query.filter(pl_filter).filter_by(
-                fixture_home_team=home_team,
-                fixture_away_team=away_team
-            ).first()
+            for f in pl_fixtures:
+                if (f.fixture_home_team and f.fixture_away_team and
+                    f.fixture_home_team.lower().strip() == (home_team or '').lower().strip() and
+                    f.fixture_away_team.lower().strip() == (away_team or '').lower().strip()):
+                    fixture = f
+                    break
             if not fixture:
-                for f in Fixture.query.filter(pl_filter).all():
-                    if (f.fixture_home_team and f.fixture_away_team and
-                        f.fixture_home_team.lower().strip() == (home_team or '').lower().strip() and
-                        f.fixture_away_team.lower().strip() == (away_team or '').lower().strip()):
-                        fixture = f
-                        break
-            if not fixture:
-                for f in Fixture.query.filter(pl_filter).all():
+                for f in pl_fixtures:
                     if _fixture_matches_game(f, home_team, away_team):
                         fixture = f
                         break
@@ -2800,17 +2820,10 @@ def check_prediction_results():
         
         print(f"DEBUG check-results: Checking {len(user_games)} predictions for user {user_id}")
         
+        all_fixtures = Fixture.query.all()
         for game in user_games:
             # Find matching fixture - exact, then case-insensitive, then normalized (& vs and, etc.)
-            fixture = Fixture.query.filter_by(
-                fixture_home_team=game.home_team,
-                fixture_away_team=game.away_team
-            ).first()
-            if not fixture:
-                for f in Fixture.query.all():
-                    if _fixture_matches_game(f, game.home_team, game.away_team):
-                        fixture = f
-                        break
+            fixture = _fixture_for_game(game, None, fixtures_list=all_fixtures)
             if not fixture:
                 fixtures_not_found += 1
                 if fixtures_not_found <= 3:
@@ -3514,18 +3527,14 @@ def get_member_predictions_for_admin(league_id, member_user_id):
             return make_response({'error': 'Only league admins can view member predictions'}, 403)
         if not get_league_membership(member_user_id, league_id):
             return make_response({'error': 'User is not a member of this league'}, 404)
+        league = League.query.get(league_id)
+        league_comp = getattr(league, 'competition_slug', None) or 'eng.1'
+        comp_filter = _fixture_query_competition(league_comp)
+        all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all()
         user_games = Game.query.filter_by(user_id=member_user_id).order_by(Game.game_week.asc()).all()
         predictions = []
         for game in user_games:
-            fixture = Fixture.query.filter_by(
-                fixture_home_team=game.home_team,
-                fixture_away_team=game.away_team
-            ).first()
-            if not fixture and game.home_team and game.away_team:
-                for f in Fixture.query.all():
-                    if (f.fixture_home_team or '').lower().strip() == (game.home_team or '').lower().strip() and (f.fixture_away_team or '').lower().strip() == (game.away_team or '').lower().strip():
-                        fixture = f
-                        break
+            fixture = _fixture_for_game(game, league_comp, fixtures_list=all_fixtures)
             prediction_data = game.to_dict()
             if fixture:
                 prediction_data['fixture'] = {
@@ -3695,15 +3704,17 @@ def get_league_leaderboard(league_id):
         # Only consider fixtures for this league's competition and on or after league creation.
         league_competition_slug = getattr(league, 'competition_slug', None) or 'eng.1'
 
-        def _member_has_game_for_fixture(member_id, fixture):
+        def _member_has_game_for_fixture(member_id, fixture, games_list=None):
             """True if member has a Game (prediction) for this fixture (using league competition for matching)."""
-            for g in Game.query.filter_by(user_id=member_id).all():
-                resolved = _fixture_for_game(g, league_competition_slug)
+            games = games_list if games_list is not None else Game.query.filter_by(user_id=member_id).all()
+            for g in games:
+                resolved = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                 if resolved and resolved.id == fixture.id:
                     return True
             return False
 
         comp_filter = _fixture_query_competition(league_competition_slug)
+        all_fixtures = (Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all())
         completed_fixtures = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
             Fixture.actual_away_score.isnot(None)
@@ -3712,6 +3723,13 @@ def get_league_leaderboard(league_id):
             completed_fixtures = completed_fixtures.filter(comp_filter)
         completed_fixtures = completed_fixtures.all()
         completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
+
+        # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
+        member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
+        all_member_games = Game.query.filter(Game.user_id.in_(member_ids)).all() if member_ids else []
+        games_by_user = {}
+        for g in all_member_games:
+            games_by_user.setdefault(g.user_id, []).append(g)
 
         scope = getattr(league, 'leaderboard_scope', 'full_season')
         if scope == 'weekly':
@@ -3746,9 +3764,9 @@ def get_league_leaderboard(league_id):
                     if lm.user.deleted_at:
                         continue
                     wins, draws, losses = 0, 0, 0
-                    games = Game.query.filter_by(user_id=lm.user.id).all()
+                    games = games_by_user.get(lm.user.id, [])
                     for g in games:
-                        fixture = _fixture_for_game(g, league_competition_slug)
+                        fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                         if not fixture or fixture.fixture_round != round_num or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
                             continue
                         res = _result_for_game(g, fixture)
@@ -3760,13 +3778,13 @@ def get_league_leaderboard(league_id):
                             losses += 1
                     rounds_with_pick = set()
                     for g in games:
-                        fx = _fixture_for_game(g, league_competition_slug)
+                        fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                         if fx and fx.fixture_round == round_num and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                             rounds_with_pick.add(fx.fixture_round)
                     for f in round_fixtures:
                         if f.fixture_round not in rounds_with_pick:
                             continue
-                        if not _member_has_game_for_fixture(lm.user.id, f):
+                        if not _member_has_game_for_fixture(lm.user.id, f, games_list=games_by_user.get(lm.user.id, [])):
                             losses += 1
                     pts = (wins * 3) + (draws * 1)
                     round_points[lm.user_id] = (pts, wins, draws, losses)
@@ -3816,9 +3834,9 @@ def get_league_leaderboard(league_id):
                     if lm.user.deleted_at:
                         continue
                     wins, draws, losses = 0, 0, 0
-                    games = Game.query.filter_by(user_id=lm.user.id).all()
+                    games = games_by_user.get(lm.user.id, [])
                     for g in games:
-                        fixture = _fixture_for_game(g, league_competition_slug)
+                        fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                         if not fixture or not _round_eq(fixture.fixture_round, display_round) or not _fixture_date_on_or_after_league(fixture, g, league_created_at) or not _fixture_matches_league_competition(fixture, league):
                             continue
                         res = _result_for_game(g, fixture)
@@ -3830,13 +3848,13 @@ def get_league_leaderboard(league_id):
                             losses += 1
                     rounds_with_pick = set()
                     for g in games:
-                        fx = _fixture_for_game(g, league_competition_slug)
+                        fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                         if fx and _round_eq(fx.fixture_round, display_round) and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                             rounds_with_pick.add(fx.fixture_round)
                     for f in round_fixtures:
                         if f.fixture_round not in rounds_with_pick:
                             continue
-                        if not _member_has_game_for_fixture(lm.user.id, f):
+                        if not _member_has_game_for_fixture(lm.user.id, f, games_list=games_by_user.get(lm.user.id, [])):
                             losses += 1
                     points = (wins * 3) + (draws * 1)
                     total_games = wins + draws + losses
@@ -3865,9 +3883,9 @@ def get_league_leaderboard(league_id):
             draws = lm.backfill_draws or 0
             losses = lm.backfill_losses or 0
             # Add live results from member's predictions for fixtures that have scores (only on or after league creation, same competition)
-            games = Game.query.filter_by(user_id=member.id).all()
+            games = games_by_user.get(member.id, [])
             for g in games:
-                fixture = _fixture_for_game(g, league_competition_slug)
+                fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                 if not _fixture_matches_league_competition(fixture, league) or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
                     continue
                 result = _result_for_game(g, fixture)
@@ -3880,13 +3898,13 @@ def get_league_leaderboard(league_id):
             # Missed pick = no prediction for a completed fixture in a round where they have at least one pick (on or after league creation, same competition) → count as Loss
             rounds_with_pick = set()
             for g in games:
-                fx = _fixture_for_game(g, league_competition_slug)
+                fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                 if fx and fx.fixture_round is not None and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
                     rounds_with_pick.add(fx.fixture_round)
             for f in completed_fixtures:
                 if f.fixture_round not in rounds_with_pick:
                     continue
-                if not _member_has_game_for_fixture(member.id, f):
+                if not _member_has_game_for_fixture(member.id, f, games_list=games_by_user.get(member.id, [])):
                     losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
             total_games = wins + draws + losses
@@ -3984,7 +4002,12 @@ def run_migrations():
 def _dedupe_fixtures():
     """Remove duplicate fixtures (same competition, round, normalized home/away). Keeps one per match.
     Prefer keeping the row with external_id set (football-data/ESPN id); else keep smallest id.
-    Returns number of duplicate rows removed."""
+    Returns number of duplicate rows removed.
+
+    Predictions are preserved: Prediction -> game_id -> Game. Games do not store fixture_id; they store
+    home_team/away_team. Fixtures are matched to games by team names (with normalization) in _fixture_for_game.
+    Dedupe only deletes Fixture rows; Game and Prediction are never touched. The remaining fixture per match
+    still matches all existing games by team names."""
     fixtures = Fixture.query.all()
     groups = {}
     for f in fixtures:
