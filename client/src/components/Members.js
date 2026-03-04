@@ -98,6 +98,29 @@ function Members() {
                 } else if (league) {
                     setSelectedCompetition('eng.1')
                 }
+                // Admin: auto-refresh fixture scores when league page loads so results/leaderboard are up to date
+                if (league?.is_admin) {
+                    const comp = league.competition_slug || 'eng.1'
+                    setSyncing(true)
+                    authenticatedFetch('/api/v1/fixtures/sync-scores', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ competition: comp })
+                    })
+                        .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
+                        .then(data => {
+                            if (data?.error) throw new Error(data.error)
+                            return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+                        })
+                        .then(() => {
+                            getPredictions()
+                            fetchLeaderboard()
+                            getAvailableRounds()
+                            loadCurrentRoundAndFixtures()
+                        })
+                        .catch(() => {})
+                        .finally(() => setSyncing(false))
+                }
             })
             .catch(() => setLeagueDetail(null))
         fetchLeaderboard()
@@ -137,41 +160,16 @@ function Members() {
             .finally(() => setLoadingStandings(false))
     }, [effectiveCompetition])
 
-    // On league page load: refresh results (check-results) for everyone; admins also refresh scores from the right source
+    // On league page load: run check-results so W/D/L are up to date. (Admin score refresh runs in league-fetch effect when league.is_admin.)
     useEffect(() => {
         if (!leagueId) return
-        // Everyone: run check-results so W/D/L are up to date from current fixture data
         authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
             .then(() => {
                 getPredictions()
                 fetchLeaderboard()
             })
             .catch(() => {})
-
-        if (!isAdmin) return
-        // Admin: refresh scores. All leagues (including Premier League eng.1) use competition=slug; backend uses football-data.org or ESPN.
-        const syncBody = { competition: effectiveCompetition || 'eng.1' }
-        setSyncing(true)
-        const syncPromise = authenticatedFetch('/api/v1/fixtures/sync-scores', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(syncBody)
-        })
-        syncPromise
-            .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
-            .then(data => {
-                if (data && data.error) throw new Error(data.error)
-                return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
-            })
-            .then(() => {
-                getPredictions()
-                fetchLeaderboard()
-                if (leagueId) getAvailableRounds()
-                if (leagueId) loadCurrentRoundAndFixtures()
-            })
-            .catch(() => {})
-            .finally(() => setSyncing(false))
-    }, [leagueId, isAdmin, effectiveCompetition])
+    }, [leagueId])
 
     function getAvailableRounds() {
         const q = effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : ''
