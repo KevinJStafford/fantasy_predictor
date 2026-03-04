@@ -281,26 +281,6 @@ function Members() {
             })
     }
 
-    function dedupeFixtures() {
-        setSyncing(true)
-        setSyncMessage(null)
-        authenticatedFetch('/api/v1/fixtures/dedupe', { method: 'POST' })
-            .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Dedupe failed') }))
-            .then(data => {
-                const removed = data.removed ?? 0
-                setSyncMessage({ type: 'success', text: data.message || `Removed ${removed} duplicate fixture(s).` })
-                if (removed > 0) {
-                    getAvailableRounds()
-                    if (gameWeek) getFixtures(parseInt(gameWeek, 10))
-                }
-            })
-            .catch(err => setSyncMessage({ type: 'error', text: err.message || 'Failed to dedupe fixtures.' }))
-            .finally(() => {
-                setSyncing(false)
-                setTimeout(() => setSyncMessage(null), 6000)
-            })
-    }
-
     function syncFixtures() {
         setSyncing(true)
         setSyncMessage(null)
@@ -713,14 +693,6 @@ function Members() {
                             disabled={syncing}
                         >
                             Backfill standings
-                        </Button>
-                        <Button
-                            variant="outlined"
-                            color="warning"
-                            onClick={dedupeFixtures}
-                            disabled={syncing}
-                        >
-                            Dedupe fixtures
                         </Button>
                     </>
                 )}
