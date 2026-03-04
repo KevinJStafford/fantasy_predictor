@@ -3664,8 +3664,12 @@ def _fixture_date_on_or_after_league(fixture, game, league_created_at):
         dt = game.game_week
     if dt is None:
         return True  # include when date unknown so we don't exclude valid games from scoring
-    # Normalize for comparison (naive vs aware)
+    # Compare as dates when possible so same calendar day counts (avoids timezone/midnight excluding fixtures)
     try:
+        dt_date = dt.date() if hasattr(dt, 'date') and callable(getattr(dt, 'date')) else dt
+        lc_date = league_created_at.date() if hasattr(league_created_at, 'date') and callable(getattr(league_created_at, 'date')) else league_created_at
+        if isinstance(dt_date, date) and isinstance(lc_date, date):
+            return dt_date >= lc_date
         if dt.tzinfo is None and league_created_at.tzinfo:
             dt = dt.replace(tzinfo=timezone.utc)
         elif dt.tzinfo and league_created_at.tzinfo is None:
@@ -3744,6 +3748,24 @@ def get_league_leaderboard(league_id):
             completed_fixtures = completed_fixtures.filter(comp_filter)
         completed_fixtures = completed_fixtures.all()
         completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
+
+        debug_data = None
+        if request.args.get('debug'):
+            debug_data = {
+                'league_competition_slug': league_competition_slug,
+                'league_created_at': str(league_created_at) if league_created_at else None,
+                'all_fixtures_count': len(all_fixtures),
+                'completed_fixtures_count': len(completed_fixtures),
+                'completed_fixtures_sample': [
+                    {'id': f.id, 'home': f.fixture_home_team, 'away': f.fixture_away_team,
+                     'actual': (f.actual_home_score, f.actual_away_score), 'comp': getattr(f, 'competition_slug', None), 'round': getattr(f, 'fixture_round', None)}
+                    for f in completed_fixtures[:5]
+                ],
+                'member_ids': member_ids,
+                'all_member_games_count': len(all_member_games),
+                'games_per_member': {uid: len(games_by_user.get(uid, [])) for uid in member_ids},
+                'backfill_sample': [{'user_id': lm.user.id, 'wins': lm.backfill_wins, 'draws': lm.backfill_draws, 'losses': lm.backfill_losses} for lm in league.league_memberships[:5] if not getattr(lm.user, 'deleted_at', None)],
+            }
 
         # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
         member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
@@ -3901,11 +3923,10 @@ def get_league_leaderboard(league_id):
                         'weeks_won': weeks_won_map.get(lm.user.id, 0),
                     })
                 leaderboard.sort(key=lambda x: (x['points'], -x['losses'], x['wins'], x['draws']), reverse=True)
-            return make_response({
-                'leaderboard': leaderboard,
-                'scope': 'weekly',
-                'current_round': display_round,
-            }, 200)
+            resp = {'leaderboard': leaderboard, 'scope': 'weekly', 'current_round': display_round}
+            if debug_data is not None:
+                resp['debug'] = debug_data
+            return make_response(resp, 200)
 
         # Full season: backfill + fixture-first scoring. Iterate completed fixtures and match each member's game by team names (same logic as _fixture_matches_game) so leaderboard works after API/team-name changes.
         leaderboard = []
@@ -3943,6 +3964,16 @@ def get_league_leaderboard(league_id):
                 else:
                     if f.fixture_round is not None and f.fixture_round in rounds_with_pick:
                         losses += 1
+            # Fallback: if no completed fixtures in DB (e.g. sync didn't match) but games have game_result from check-results, count those so leaderboard isn't stuck at 0
+            if (wins, draws, losses) == (lm.backfill_wins or 0, lm.backfill_draws or 0, lm.backfill_losses or 0) and not completed_fixtures:
+                for g in games:
+                    gr = getattr(g, 'game_result', None)
+                    if gr == 'Win':
+                        wins += 1
+                    elif gr == 'Draw':
+                        draws += 1
+                    elif gr == 'Loss':
+                        losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
             total_games = wins + draws + losses
             leaderboard.append({
@@ -3957,8 +3988,24 @@ def get_league_leaderboard(league_id):
         
         # Sort by points (descending), then by fewest losses first, then wins, then draws
         leaderboard.sort(key=lambda x: (x['points'], -x['losses'], x['wins'], x['draws']), reverse=True)
+
+        if debug_data and completed_fixtures and member_ids:
+            first_member_id = member_ids[0]
+            first_fixture = completed_fixtures[0]
+            games = games_by_user.get(first_member_id, [])
+            matched_game = _game_for_fixture(first_fixture, games)
+            debug_data['match_test'] = {
+                'first_fixture': {'home': first_fixture.fixture_home_team, 'away': first_fixture.fixture_away_team},
+                'first_member_id': first_member_id,
+                'games_count': len(games),
+                'matched': matched_game is not None,
+                'games_sample': [{'home': g.home_team, 'away': g.away_team, 'matches': _fixture_matches_game(first_fixture, g.home_team, g.away_team)} for g in games[:8]],
+            }
         
-        return make_response({'leaderboard': leaderboard, 'scope': 'full_season'}, 200)
+        resp = {'leaderboard': leaderboard, 'scope': 'full_season'}
+        if debug_data is not None:
+            resp['debug'] = debug_data
+        return make_response(resp, 200)
     except Exception as e:
         print(f"Error fetching leaderboard: {str(e)}")
         import traceback
