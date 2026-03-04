@@ -70,7 +70,8 @@ def _team_names_equivalent(a, b):
 
 
 def _fixture_matches_game(fixture, home_team, away_team):
-    """True if fixture's teams match the given home/away (exact, case-insensitive, normalized, or alias)."""
+    """True if fixture's teams match the given home/away (exact, case-insensitive, normalized, or alias).
+    Uses _normalize_team_name_for_match so 'Chelsea FC' matches 'Chelsea' (leaderboard and predictions)."""
     if not fixture or not fixture.fixture_home_team or not fixture.fixture_away_team:
         return False
     f_h = (fixture.fixture_home_team or '').strip()
@@ -84,6 +85,8 @@ def _fixture_matches_game(fixture, home_team, away_team):
     if _normalize_team_name(f_h) == _normalize_team_name(g_h) and _normalize_team_name(f_a) == _normalize_team_name(g_a):
         return True
     if _team_names_equivalent(f_h, g_h) and _team_names_equivalent(f_a, g_a):
+        return True
+    if _normalize_team_name_for_match(f_h) == _normalize_team_name_for_match(g_h) and _normalize_team_name_for_match(f_a) == _normalize_team_name_for_match(g_a):
         return True
     return False
 
