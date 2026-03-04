@@ -2099,7 +2099,7 @@ class PredictionsResource(Resource):
             
             # Preload fixtures once to avoid N+1: each _fixture_for_game would otherwise do Fixture.query.all()
             comp_filter = _fixture_query_competition(competition_slug) if competition_slug else None
-            all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all()
+            all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all()
             
             predictions = []
             fixtures_found = 0
@@ -2543,7 +2543,7 @@ def sync_fixture_scores():
         print(f"DEBUG sync-scores: Processing {len(all_items)} matches from API")
         
         pl_filter = _fixture_query_competition('eng.1')
-        pl_fixtures = Fixture.query.filter(pl_filter).all() if pl_filter else []
+        pl_fixtures = Fixture.query.filter(pl_filter).all() if pl_filter is not None else []
         for idx, match_data in enumerate(all_items):
             # Extract match information and scores (scores are nested in homeTeam/awayTeam)
             home_team = None
@@ -3551,7 +3551,7 @@ def get_member_predictions_for_admin(league_id, member_user_id):
         league = League.query.get(league_id)
         league_comp = getattr(league, 'competition_slug', None) or 'eng.1'
         comp_filter = _fixture_query_competition(league_comp)
-        all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all()
+        all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all()
         user_games = Game.query.filter_by(user_id=member_user_id).order_by(Game.game_week.asc()).all()
         predictions = []
         for game in user_games:
@@ -3740,7 +3740,7 @@ def get_league_leaderboard(league_id):
             return False
 
         comp_filter = _fixture_query_competition(league_competition_slug)
-        all_fixtures = (Fixture.query.filter(comp_filter).all() if comp_filter else Fixture.query.all())
+        all_fixtures = (Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all())
         completed_fixtures = Fixture.query.filter(
             Fixture.actual_home_score.isnot(None),
             Fixture.actual_away_score.isnot(None)
