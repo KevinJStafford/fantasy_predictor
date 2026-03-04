@@ -809,12 +809,19 @@ function Members() {
                                     </TableHead>
                                     <TableBody>
                                         {filteredFixtures.map((fixture) => {
+                                            const norm = (s) => (String(s || '').toLowerCase().trim()
+                                                .replace(/&/g, ' and ')
+                                                .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+                                                .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
+                                                .replace(/\s+/g, ' ')
+                                            )
                                             const matchingPrediction = predictions.find(p =>
-                                                p.fixture && p.fixture.id === fixture.id
+                                                p.fixture && p.fixture.id && fixture.id && Number(p.fixture.id) === Number(fixture.id)
                                             ) || predictions.find(p =>
                                                 p.home_team && p.away_team &&
-                                                p.home_team.toLowerCase().trim() === fixture.fixture_home_team?.toLowerCase().trim() &&
-                                                p.away_team.toLowerCase().trim() === fixture.fixture_away_team?.toLowerCase().trim()
+                                                fixture.fixture_home_team != null && fixture.fixture_away_team != null &&
+                                                norm(p.home_team) === norm(fixture.fixture_home_team) &&
+                                                norm(p.away_team) === norm(fixture.fixture_away_team)
                                             )
                                             return (
                                                 <Predictions
@@ -850,26 +857,30 @@ function Members() {
                                     <Typography variant="body2">Loading results...</Typography>
                                 ) : (() => {
                                     const selectedRound = parseInt(gameWeek, 10)
-                                    const roundMatch = (p) => {
-                                        const r = p.fixture.round ?? p.fixture.fixture_round
-                                        if (r == null) return false
-                                        return Number(r) === selectedRound
-                                    }
-                                    const competitionMatch = (p) => {
-                                        if (!effectiveCompetition) return true
-                                        if (!leagueDetail?.competition_slug) return true
-                                        const slug = p.fixture.competition_slug
-                                        if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
-                                        return slug === effectiveCompetition
-                                    }
-                                    const hasBothScores = (p) =>
-                                        p.fixture.actual_home_score != null && p.fixture.actual_away_score != null
-                                    const completedPredictions = predictions
-                                        .filter(p => {
-                                            if (!p.fixture) return false
-                                            if (!hasBothScores(p)) return false
-                                            return roundMatch(p) && competitionMatch(p)
+                                    const norm = (s) => (String(s || '').toLowerCase().trim()
+                                        .replace(/&/g, ' and ')
+                                        .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+                                        .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
+                                        .replace(/\s+/g, ' ')
+                                    )
+                                    // Build from completed fixtures in this round so we show every completed game (not only those with fixture attached to prediction)
+                                    const completedFixturesForRound = (filteredFixtures || []).filter(
+                                        f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
+                                        f.actual_home_score != null && f.actual_away_score != null
+                                    )
+                                    const completedPredictions = completedFixturesForRound
+                                        .map(fixture => {
+                                            const pred = predictions.find(p =>
+                                                p.fixture?.id && Number(p.fixture.id) === Number(fixture.id)
+                                            ) || predictions.find(p =>
+                                                p.home_team && p.away_team &&
+                                                norm(p.home_team) === norm(fixture.fixture_home_team) &&
+                                                norm(p.away_team) === norm(fixture.fixture_away_team)
+                                            )
+                                            if (!pred) return null
+                                            return { ...pred, fixture: { ...(pred.fixture || {}), ...fixture, actual_home_score: fixture.actual_home_score, actual_away_score: fixture.actual_away_score, round: fixture.fixture_round, date: fixture.fixture_date } }
                                         })
+                                        .filter(Boolean)
                                         .sort((a, b) => {
                                             const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
                                             const dateB = b.fixture?.date ? new Date(b.fixture.date).getTime() : 0
@@ -1033,50 +1044,65 @@ function Members() {
                         </Typography>
                         {loadingLeaderboard ? (
                             <Typography variant="body2">Loading leaderboard...</Typography>
-                        ) : leaderboard.length > 0 ? (
-                            <TableContainer component={Paper}>
-                                <Table size="small">
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell><strong>Rank</strong></TableCell>
-                                            <TableCell><strong>Player</strong></TableCell>
-                                            <TableCell align="right"><strong>Points</strong></TableCell>
-                                            <TableCell align="right"><strong>W</strong></TableCell>
-                                            <TableCell align="right"><strong>D</strong></TableCell>
-                                            <TableCell align="right"><strong>L</strong></TableCell>
-                                            {leaderboardScope === 'weekly' && (
-                                                <TableCell align="right"><strong>{isWorldCup ? 'Days won' : 'Weeks won'}</strong></TableCell>
-                                            )}
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {leaderboard.map((player, index) => (
-                                            <TableRow 
-                                                key={player.user_id}
-                                                sx={{ 
-                                                    '&:nth-of-type(odd)': { backgroundColor: 'action.hover' },
-                                                    backgroundColor: index === 0 ? 'success.light' : 'inherit'
-                                                }}
-                                            >
-                                                <TableCell><strong>#{index + 1}</strong></TableCell>
-                                                <TableCell>{player.display_name}</TableCell>
-                                                <TableCell align="right"><strong>{player.points}</strong></TableCell>
-                                                <TableCell align="right">{player.wins}</TableCell>
-                                                <TableCell align="right">{player.draws}</TableCell>
-                                                <TableCell align="right">{player.losses}</TableCell>
+                        ) : (() => {
+                            const displayLeaderboard = leaderboard.length > 0
+                                ? leaderboard
+                                : (leagueMembers.length > 0
+                                    ? leagueMembers.map(m => ({
+                                        user_id: m.id,
+                                        display_name: m.display_name ?? m.email ?? 'Member',
+                                        wins: 0,
+                                        draws: 0,
+                                        losses: 0,
+                                        points: 0,
+                                        weeks_won: 0,
+                                    }))
+                                    : [])
+                            return displayLeaderboard.length > 0 ? (
+                                <TableContainer component={Paper}>
+                                    <Table size="small">
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell><strong>Rank</strong></TableCell>
+                                                <TableCell><strong>Player</strong></TableCell>
+                                                <TableCell align="right"><strong>Points</strong></TableCell>
+                                                <TableCell align="right"><strong>W</strong></TableCell>
+                                                <TableCell align="right"><strong>D</strong></TableCell>
+                                                <TableCell align="right"><strong>L</strong></TableCell>
                                                 {leaderboardScope === 'weekly' && (
-                                                    <TableCell align="right">{player.weeks_won ?? 0}</TableCell>
+                                                    <TableCell align="right"><strong>{isWorldCup ? 'Days won' : 'Weeks won'}</strong></TableCell>
                                                 )}
                                             </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        ) : (
-                            <Typography variant="body2" color="text.secondary">
-                                No leaderboard data available yet.
-                            </Typography>
-                        )}
+                                        </TableHead>
+                                        <TableBody>
+                                            {displayLeaderboard.map((player, index) => (
+                                                <TableRow 
+                                                    key={player.user_id}
+                                                    sx={{ 
+                                                        '&:nth-of-type(odd)': { backgroundColor: 'action.hover' },
+                                                        backgroundColor: index === 0 ? 'success.light' : 'inherit'
+                                                    }}
+                                                >
+                                                    <TableCell><strong>#{index + 1}</strong></TableCell>
+                                                    <TableCell>{player.display_name}</TableCell>
+                                                    <TableCell align="right"><strong>{player.points}</strong></TableCell>
+                                                    <TableCell align="right">{player.wins}</TableCell>
+                                                    <TableCell align="right">{player.draws}</TableCell>
+                                                    <TableCell align="right">{player.losses}</TableCell>
+                                                    {leaderboardScope === 'weekly' && (
+                                                        <TableCell align="right">{player.weeks_won ?? 0}</TableCell>
+                                                    )}
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                    No leaderboard data available yet.
+                                </Typography>
+                            )
+                        })()}
                     </Box>
 
                     {/* League members (admin: remove) */}
@@ -1265,26 +1291,29 @@ function Members() {
                                 <Typography variant="body2">Loading results...</Typography>
                             ) : (() => {
                                 const selectedRound = parseInt(gameWeek, 10)
-                                const roundMatch = (p) => {
-                                    const r = p.fixture.round ?? p.fixture.fixture_round
-                                    if (r == null) return false
-                                    return Number(r) === selectedRound
-                                }
-                                const competitionMatch = (p) => {
-                                    if (!effectiveCompetition) return true
-                                    if (!leagueDetail?.competition_slug) return true
-                                    const slug = p.fixture.competition_slug
-                                    if (effectiveCompetition === 'eng.1') return slug === 'eng.1' || slug == null
-                                    return slug === effectiveCompetition
-                                }
-                                const hasBothScores = (p) =>
-                                    p.fixture.actual_home_score != null && p.fixture.actual_away_score != null
-                                const completedPredictions = predictions
-                                    .filter(p => {
-                                        if (!p.fixture) return false
-                                        if (!hasBothScores(p)) return false
-                                        return roundMatch(p) && competitionMatch(p)
+                                const norm = (s) => (String(s || '').toLowerCase().trim()
+                                    .replace(/&/g, ' and ')
+                                    .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+                                    .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
+                                    .replace(/\s+/g, ' ')
+                                )
+                                const completedFixturesForRound = (filteredFixtures || []).filter(
+                                    f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
+                                    f.actual_home_score != null && f.actual_away_score != null
+                                )
+                                const completedPredictions = completedFixturesForRound
+                                    .map(fixture => {
+                                        const pred = predictions.find(p =>
+                                            p.fixture?.id && Number(p.fixture.id) === Number(fixture.id)
+                                        ) || predictions.find(p =>
+                                            p.home_team && p.away_team &&
+                                            norm(p.home_team) === norm(fixture.fixture_home_team) &&
+                                            norm(p.away_team) === norm(fixture.fixture_away_team)
+                                        )
+                                        if (!pred) return null
+                                        return { ...pred, fixture: { ...(pred.fixture || {}), ...fixture, actual_home_score: fixture.actual_home_score, actual_away_score: fixture.actual_away_score, round: fixture.fixture_round, date: fixture.fixture_date } }
                                     })
+                                    .filter(Boolean)
                                     .sort((a, b) => {
                                         const dateA = a.fixture?.date ? new Date(a.fixture.date).getTime() : 0
                                         const dateB = b.fixture?.date ? new Date(b.fixture.date).getTime() : 0
@@ -1491,7 +1520,26 @@ function Members() {
             <DialogContent>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     Paste JSON with a &quot;standings&quot; array. Each item: display_name (must match a league member), wins, draws, losses, points (optional).
+                    Use &quot;Export current&quot; to save a backup or restore previously backfilled scores.
                 </Typography>
+                <Button
+                    variant="outlined"
+                    size="small"
+                    sx={{ mb: 2 }}
+                    disabled={!leagueId}
+                    onClick={() => {
+                        if (!leagueId) return
+                        authenticatedFetch(`/api/v1/leagues/${leagueId}/backfill-standings`)
+                            .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Failed to load') }))
+                            .then(data => {
+                                setBackfillJson(JSON.stringify({ standings: data.standings || [] }, null, 2))
+                                setBackfillMessage({ type: 'success', text: 'Current backfill loaded. Save this JSON as a backup or Submit to re-apply.' })
+                            })
+                            .catch(err => setBackfillMessage({ type: 'error', text: err.message || 'Could not load backfill' }))
+                    }}
+                >
+                    Export current backfill
+                </Button>
                 <TextField
                     multiline
                     minRows={6}

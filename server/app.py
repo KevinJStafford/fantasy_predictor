@@ -3780,6 +3780,13 @@ def get_league_leaderboard(league_id):
                             draws += 1
                         elif res == 'Loss':
                             losses += 1
+                        elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
+                            if g.game_result == 'Win':
+                                wins += 1
+                            elif g.game_result == 'Draw':
+                                draws += 1
+                            else:
+                                losses += 1
                     rounds_with_pick = set()
                     for g in games:
                         fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
@@ -3850,6 +3857,13 @@ def get_league_leaderboard(league_id):
                             draws += 1
                         elif res == 'Loss':
                             losses += 1
+                        elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
+                            if g.game_result == 'Win':
+                                wins += 1
+                            elif g.game_result == 'Draw':
+                                draws += 1
+                            else:
+                                losses += 1
                     rounds_with_pick = set()
                     for g in games:
                         fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
@@ -3876,20 +3890,30 @@ def get_league_leaderboard(league_id):
                 'current_round': display_round,
             }, 200)
 
-        # Full season: combine backfill (imported table) with live W/D/L from scored predictions; missed picks = Loss
+        # Full season: backfill (imported W/D/L) + every game stored in the app (from fixture or stored game_result); missed picks = Loss
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
             if member.deleted_at:
                 continue
-            # Start with backfill totals (e.g. from Google Sheet)
+            # 1) Backfill totals (imported from sheet or previous backfill)
             wins = lm.backfill_wins or 0
             draws = lm.backfill_draws or 0
             losses = lm.backfill_losses or 0
-            # Add live results from member's predictions for fixtures that have scores (only on or after league creation, same competition)
+            # 2) Add every game (prediction) stored in the app: use fixture result when available, else stored game_result
             games = games_by_user.get(member.id, [])
             for g in games:
                 fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
+                if fixture is None:
+                    # Fixture not found (e.g. after dedupe/team name change); use stored game_result so leaderboard keeps historical scores
+                    gr = getattr(g, 'game_result', None)
+                    if gr == 'Win':
+                        wins += 1
+                    elif gr == 'Draw':
+                        draws += 1
+                    elif gr == 'Loss':
+                        losses += 1
+                    continue
                 if not _fixture_matches_league_competition(fixture, league) or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
                     continue
                 result = _result_for_game(g, fixture)
@@ -3899,6 +3923,14 @@ def get_league_leaderboard(league_id):
                     draws += 1
                 elif result == 'Loss':
                     losses += 1
+                elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
+                    # Fixture has no scores yet or mismatch; use stored result so we don't drop historical scores
+                    if g.game_result == 'Win':
+                        wins += 1
+                    elif g.game_result == 'Draw':
+                        draws += 1
+                    else:
+                        losses += 1
             # Missed pick = no prediction for a completed fixture in a round where they have at least one pick (on or after league creation, same competition) → count as Loss
             rounds_with_pick = set()
             for g in games:
@@ -3930,6 +3962,35 @@ def get_league_leaderboard(league_id):
         print(f"Error fetching leaderboard: {str(e)}")
         import traceback
         print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/backfill-standings', methods=['GET'])
+def get_backfill_standings(league_id):
+    """Admin only: return current backfill wins/draws/losses/points for each league member.
+    Use this to export a backup before changing backfill, or to recover by re-POSTing the same JSON."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can view backfill standings'}, 403)
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+        standings = []
+        for lm in league.league_memberships:
+            if getattr(lm.user, 'deleted_at', None):
+                continue
+            standings.append({
+                'display_name': lm.display_name,
+                'wins': lm.backfill_wins if lm.backfill_wins is not None else 0,
+                'draws': lm.backfill_draws if lm.backfill_draws is not None else 0,
+                'losses': lm.backfill_losses if lm.backfill_losses is not None else 0,
+                'points': lm.backfill_points if lm.backfill_points is not None else ((lm.backfill_wins or 0) * 3 + (lm.backfill_draws or 0) * 1),
+            })
+        return make_response({'standings': standings}, 200)
+    except Exception as e:
         return make_response({'error': str(e)}, 500)
 
 
