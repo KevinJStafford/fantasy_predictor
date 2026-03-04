@@ -1103,6 +1103,10 @@ def _normalize_team_name_for_match(name):
     for prefix in ('fc ', 'afc ', 'ssc ', 'sc ', 'cf ', 'fk ', 'real ', 'atletico '):
         if s.startswith(prefix):
             s = s[len(prefix):].strip()
+    # Drop common suffixes so "Chelsea FC" and "Chelsea" match (football-data.org uses suffix style)
+    for suffix in (' fc', ' fc.', ' afc', ' afc.'):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)].strip()
     # Place-name variants (German vs English)
     s = s.replace('muenchen', 'munich')
     s = s.replace('moenchengladbach', 'munchengladbach')
@@ -4012,6 +4016,10 @@ def _dedupe_fixtures():
     groups = {}
     for f in fixtures:
         comp = getattr(f, 'competition_slug', None) or ''
+        # Legacy Pulselive EPL rows used NULL/'' competition_slug; treat them as eng.1 for dedupe grouping
+        # so they collapse with football-data eng.1 rows.
+        if comp == '':
+            comp = 'eng.1'
         rnd = getattr(f, 'fixture_round', None)
         norm_h = _normalize_team_name_for_match(getattr(f, 'fixture_home_team', None) or '')
         norm_a = _normalize_team_name_for_match(getattr(f, 'fixture_away_team', None) or '')

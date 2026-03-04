@@ -204,7 +204,7 @@ function Members() {
             const round = data.round != null ? String(data.round) : ''
             setGameWeek(round)
             if (round) {
-                getFixtures(parseInt(round, 10), true)
+                getFixtures(parseInt(round, 10))
             } else {
                 setFilteredFixtures([])
             }
@@ -215,28 +215,18 @@ function Members() {
         })
     }
 
-    function getFixtures(roundNumber = null, includeNextRound = false) {
+    function getFixtures(roundNumber = null) {
         setLoadingFixtures(true)
-        const query = effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : ''
-        const roundsToFetch = []
-        if (roundNumber != null) {
-            roundsToFetch.push(roundNumber)
-            if (includeNextRound && availableRounds.length > 0) {
-                const idx = availableRounds.indexOf(roundNumber)
-                if (idx !== -1 && idx < availableRounds.length - 1) {
-                    const nextRound = availableRounds[idx + 1]
-                    if (nextRound != null && nextRound !== roundNumber) roundsToFetch.push(nextRound)
-                }
-            }
-        }
-        const urls = roundsToFetch.length > 0
-            ? roundsToFetch.map(r => apiUrl(`/api/v1/fixtures/${r}`) + query)
-            : [apiUrl('/api/v1/fixtures') + query]
-        Promise.all(urls.map(url => fetch(url).then(res => res.ok ? res.json() : [])))
-            .then(results => {
-                const merged = (Array.isArray(results) ? results : [results]).flat()
-                const fixturesList = merged.every(Array.isArray) ? merged.flat() : (Array.isArray(merged[0]) ? merged.flat() : merged)
-                const sorted = [...(Array.isArray(fixturesList) ? fixturesList : [])].sort((a, b) => {
+        const base = roundNumber != null ? apiUrl(`/api/v1/fixtures/${roundNumber}`) : apiUrl('/api/v1/fixtures')
+        const url = base + (effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : '')
+        fetch(url)
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to fetch fixtures')
+                return response.json()
+            })
+            .then(fixturesData => {
+                const fixturesList = Array.isArray(fixturesData) ? fixturesData : []
+                const sorted = [...fixturesList].sort((a, b) => {
                     const ad = a?.fixture_date ? new Date(a.fixture_date).getTime() : Number.POSITIVE_INFINITY
                     const bd = b?.fixture_date ? new Date(b.fixture_date).getTime() : Number.POSITIVE_INFINITY
                     return ad - bd
@@ -247,9 +237,7 @@ function Members() {
                 console.error('Error fetching fixtures:', error)
                 setFilteredFixtures([])
             })
-            .finally(() => {
-                setLoadingFixtures(false)
-            })
+            .finally(() => setLoadingFixtures(false))
     }
 
     function refreshScores() {
@@ -305,7 +293,7 @@ function Members() {
                 setSyncMessage({ type: 'success', text: data.message || `Removed ${removed} duplicate fixture(s).` })
                 if (removed > 0) {
                     getAvailableRounds()
-                    if (gameWeek) getFixtures(parseInt(gameWeek, 10), true)
+                    if (gameWeek) getFixtures(parseInt(gameWeek, 10))
                 }
             })
             .catch(err => setSyncMessage({ type: 'error', text: err.message || 'Failed to dedupe fixtures.' }))
@@ -672,7 +660,7 @@ function Members() {
         if (selectedValue === '' || selectedValue === 'all') {
             setFilteredFixtures([])
         } else {
-            getFixtures(parseInt(selectedValue), true)
+            getFixtures(parseInt(selectedValue))
         }
     }
 
@@ -820,9 +808,7 @@ function Members() {
                                         </TableRow>
                                     </TableHead>
                                     <TableBody>
-                                        {filteredFixtures.map((fixture, idx) => {
-                                            const prevRound = idx > 0 ? filteredFixtures[idx - 1]?.fixture_round : null
-                                            const showRoundLabel = fixture.fixture_round != null && prevRound != null && fixture.fixture_round !== prevRound
+                                        {filteredFixtures.map((fixture) => {
                                             const matchingPrediction = predictions.find(p =>
                                                 p.fixture && p.fixture.id === fixture.id
                                             ) || predictions.find(p =>
@@ -831,26 +817,18 @@ function Members() {
                                                 p.away_team.toLowerCase().trim() === fixture.fixture_away_team?.toLowerCase().trim()
                                             )
                                             return (
-                                                <React.Fragment key={fixture.id}>
-                                                    {showRoundLabel && (
-                                                        <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                                                            <TableCell colSpan={7} sx={{ py: 1, fontWeight: 600, fontSize: '0.875rem' }}>
-                                                                {weekOrDayTitle(fixture.fixture_round)} (upcoming)
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    )}
-                                                    <Predictions
-                                                        fixture={fixture}
-                                                        existingPrediction={matchingPrediction}
-                                                        onPredictionSaved={() => {
-                                                            getPredictions()
-                                                            if (leagueId) fetchLeaderboard()
-                                                        }}
-                                                        asTableRow
-                                                        allowAskAi={leagueDetail?.ai_predictions_enabled === true}
-                                                        leagueId={leagueId}
-                                                    />
-                                                </React.Fragment>
+                                                <Predictions
+                                                    key={fixture.id}
+                                                    fixture={fixture}
+                                                    existingPrediction={matchingPrediction}
+                                                    onPredictionSaved={() => {
+                                                        getPredictions()
+                                                        if (leagueId) fetchLeaderboard()
+                                                    }}
+                                                    asTableRow
+                                                    allowAskAi={leagueDetail?.ai_predictions_enabled === true}
+                                                    leagueId={leagueId}
+                                                />
                                             )
                                         })}
                                     </TableBody>
@@ -1210,9 +1188,14 @@ function Members() {
                                             {adminFixturesForRound.map((fix) => {
                                                 const home = fix.fixture_home_team || fix.home_team || ''
                                                 const away = fix.fixture_away_team || fix.away_team || ''
-                                                const pred = adminMemberPredictions.find(
-                                                    p => (p.home_team || '').toLowerCase() === home.toLowerCase() && (p.away_team || '').toLowerCase() === away.toLowerCase()
+                                                const norm = (s) => (String(s || '').toLowerCase().trim()
+                                                    .replace(/&/g, ' and ')
+                                                    .replace(/^afc\s+/, '')
+                                                    .replace(/^fc\s+/, '')
+                                                    .replace(/\s+/g, ' ')
                                                 )
+                                                const pred = adminMemberPredictions.find(p => p?.fixture?.id && fix?.id && Number(p.fixture.id) === Number(fix.id))
+                                                    || adminMemberPredictions.find(p => norm(p.home_team) === norm(home) && norm(p.away_team) === norm(away))
                                                 const actualFromPred = pred?.fixture && pred.fixture.actual_home_score != null && pred.fixture.actual_away_score != null
                                                     ? `${pred.fixture.actual_home_score}–${pred.fixture.actual_away_score}`
                                                     : (fix.actual_home_score != null && fix.actual_away_score != null ? `${fix.actual_home_score}–${fix.actual_away_score}` : '–')
