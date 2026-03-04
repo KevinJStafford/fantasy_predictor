@@ -1997,7 +1997,7 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
             if not _fixture_matches_game(f, game.home_team, game.away_team):
                 continue
             if competition_slug:
-                if competition_slug == 'eng.1' and (f.competition_slug != 'eng.1' and f.competition_slug is not None):
+                if competition_slug == 'eng.1' and (f.competition_slug not in ('eng.1', None, '')):
                     continue
                 if competition_slug != 'eng.1' and f.competition_slug != competition_slug:
                     continue
@@ -2012,7 +2012,11 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
     )
     if competition_slug:
         if competition_slug == 'eng.1':
-            base = base.filter(or_(Fixture.competition_slug == 'eng.1', Fixture.competition_slug.is_(None)))
+            base = base.filter(or_(
+                Fixture.competition_slug == 'eng.1',
+                Fixture.competition_slug.is_(None),
+                Fixture.competition_slug == '',
+            ))
         else:
             base = base.filter(Fixture.competition_slug == competition_slug)
     fixture = base.first()
@@ -2029,7 +2033,7 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
             if (f.fixture_home_team and f.fixture_away_team and
                 f.fixture_home_team.lower().strip() == (game.home_team or '').lower().strip() and
                 f.fixture_away_team.lower().strip() == (game.away_team or '').lower().strip()):
-                if not competition_slug or (competition_slug == 'eng.1' and (f.competition_slug == 'eng.1' or f.competition_slug is None)) or f.competition_slug == competition_slug:
+                if not competition_slug or (competition_slug == 'eng.1' and (f.competition_slug in ('eng.1', None, ''))) or f.competition_slug == competition_slug:
                     return f
         for f in all_fixtures:
             if (f.fixture_home_team and f.fixture_away_team and
@@ -2044,7 +2048,7 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
             all_fixtures_list = Fixture.query.all()
             if competition_slug:
                 if competition_slug == 'eng.1':
-                    candidates = [f for f in all_fixtures_list if f.competition_slug == 'eng.1' or f.competition_slug is None]
+                    candidates = [f for f in all_fixtures_list if f.competition_slug in ('eng.1', None, '')]
                 else:
                     candidates = [f for f in all_fixtures_list if f.competition_slug == competition_slug]
             else:
@@ -3668,7 +3672,7 @@ def _fixture_matches_league_competition(fixture, league):
     slug = getattr(league, 'competition_slug', None) or 'eng.1'
     comp = getattr(fixture, 'competition_slug', None)
     if slug == 'eng.1':
-        return comp == 'eng.1' or comp is None
+        return comp in ('eng.1', None, '')  # '' = legacy Pulselive
     return comp == slug
 
 
