@@ -91,6 +91,16 @@ def _fixture_matches_game(fixture, home_team, away_team):
     return False
 
 
+def _game_for_fixture(fixture, games_list):
+    """Return the first Game in games_list that matches this fixture (by team names). Used for fixture-first leaderboard so we don't rely on game->fixture resolution."""
+    if not fixture or not games_list:
+        return None
+    for g in games_list:
+        if _fixture_matches_game(fixture, g.home_team, g.away_team):
+            return g
+    return None
+
+
 def _verify_password(user_id, password_str):
     """Verify password without touching User.authenticate (avoids recursion with ORM).
     Fetches hash via a simple column query."""
@@ -3897,60 +3907,42 @@ def get_league_leaderboard(league_id):
                 'current_round': display_round,
             }, 200)
 
-        # Full season: backfill (imported W/D/L) + every game stored in the app (from fixture or stored game_result); missed picks = Loss
+        # Full season: backfill + fixture-first scoring. Iterate completed fixtures and match each member's game by team names (same logic as _fixture_matches_game) so leaderboard works after API/team-name changes.
         leaderboard = []
         for lm in league.league_memberships:
             member = lm.user
             if member.deleted_at:
                 continue
-            # 1) Backfill totals (imported from sheet or previous backfill)
             wins = lm.backfill_wins or 0
             draws = lm.backfill_draws or 0
             losses = lm.backfill_losses or 0
-            # 2) Add every game (prediction) stored in the app: use fixture result when available, else stored game_result
             games = games_by_user.get(member.id, [])
-            for g in games:
-                fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
-                if fixture is None:
-                    # Fallback: DB lookup with full normalization (current week + future must count)
-                    fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=None)
-                if fixture is None:
-                    gr = getattr(g, 'game_result', None)
-                    if gr == 'Win':
-                        wins += 1
-                    elif gr == 'Draw':
-                        draws += 1
-                    elif gr == 'Loss':
-                        losses += 1
-                    continue
-                if not _fixture_matches_league_competition(fixture, league) or not _fixture_date_on_or_after_league(fixture, g, league_created_at):
-                    continue
-                result = _result_for_game(g, fixture)
-                if result == 'Win':
-                    wins += 1
-                elif result == 'Draw':
-                    draws += 1
-                elif result == 'Loss':
-                    losses += 1
-                elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
-                    # Fixture has no scores yet or mismatch; use stored result so we don't drop historical scores
-                    if g.game_result == 'Win':
-                        wins += 1
-                    elif g.game_result == 'Draw':
-                        draws += 1
-                    else:
-                        losses += 1
-            # Missed pick = no prediction for a completed fixture in a round where they have at least one pick (on or after league creation, same competition) → count as Loss
+            # Which rounds does this member have at least one prediction for? (so we can count missed picks as Loss)
             rounds_with_pick = set()
-            for g in games:
-                fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
-                if fx and fx.fixture_round is not None and _fixture_date_on_or_after_league(fx, g, league_created_at) and _fixture_matches_league_competition(fx, league):
-                    rounds_with_pick.add(fx.fixture_round)
             for f in completed_fixtures:
-                if f.fixture_round not in rounds_with_pick:
-                    continue
-                if not _member_has_game_for_fixture(member.id, f, games_list=games_by_user.get(member.id, [])):
-                    losses += 1
+                if f.fixture_round is not None and _game_for_fixture(f, games) is not None:
+                    rounds_with_pick.add(f.fixture_round)
+            # Fixture-first: for each completed fixture, find this member's game and score it
+            for f in completed_fixtures:
+                game = _game_for_fixture(f, games)
+                if game is not None:
+                    res = _result_for_game(game, f)
+                    if res == 'Win':
+                        wins += 1
+                    elif res == 'Draw':
+                        draws += 1
+                    elif res == 'Loss':
+                        losses += 1
+                    elif getattr(game, 'game_result', None) in ('Win', 'Draw', 'Loss'):
+                        if game.game_result == 'Win':
+                            wins += 1
+                        elif game.game_result == 'Draw':
+                            draws += 1
+                        else:
+                            losses += 1
+                else:
+                    if f.fixture_round is not None and f.fixture_round in rounds_with_pick:
+                        losses += 1
             points = (wins * 3) + (draws * 1) + (losses * 0)
             total_games = wins + draws + losses
             leaderboard.append({
