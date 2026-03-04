@@ -171,6 +171,16 @@ function Members() {
             .catch(() => {})
     }, [leagueId])
 
+    // Refetch admin member predictions when member or round changes (ensures mobile Select always loads correct member's picks)
+    useEffect(() => {
+        if (!leagueId || !isAdmin) return
+        const memberId = adminSelectedMemberId && String(adminSelectedMemberId).trim() ? Number(adminSelectedMemberId) : null
+        if (memberId) handleFetchMemberPredictions(memberId)
+        else setAdminMemberPredictions([])
+        const round = adminPredictionRound != null && String(adminPredictionRound).trim() !== '' ? Number(adminPredictionRound) : null
+        if (round != null && !Number.isNaN(round)) getAdminFixturesForRound(round)
+    }, [leagueId, isAdmin, adminSelectedMemberId, adminPredictionRound])
+
     function getAvailableRounds() {
         const q = effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : ''
         fetch(apiUrl('/api/v1/fixtures/rounds') + q)
@@ -583,11 +593,26 @@ function Members() {
         }
         setLoadingAdminFixtures(true)
         const url = apiUrl(`/api/v1/fixtures/${roundNum}`) + (effectiveCompetition ? `?competition=${encodeURIComponent(effectiveCompetition)}` : '')
+        const norm = (s) => (String(s || '').toLowerCase().trim()
+            .replace(/&/g, ' and ')
+            .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+            .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
+            .replace(/\s+/g, ' ')
+        )
         fetch(url)
             .then(res => res.ok ? res.json() : [])
             .then(data => {
                 const list = Array.isArray(data) ? data : []
-                setAdminFixturesForRound([...list].sort((a, b) => {
+                const seen = new Set()
+                const deduped = list.filter(f => {
+                    const home = f.fixture_home_team || f.home_team || ''
+                    const away = f.fixture_away_team || f.away_team || ''
+                    const key = `${norm(home)}|${norm(away)}`
+                    if (seen.has(key)) return false
+                    seen.add(key)
+                    return true
+                })
+                setAdminFixturesForRound([...deduped].sort((a, b) => {
                     const ad = a?.fixture_date ? new Date(a.fixture_date).getTime() : 0
                     const bd = b?.fixture_date ? new Date(b.fixture_date).getTime() : 0
                     return ad - bd
@@ -833,11 +858,18 @@ function Members() {
                                         .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
                                         .replace(/\s+/g, ' ')
                                     )
-                                    // Build from completed fixtures in this round so we show every completed game (not only those with fixture attached to prediction)
-                                    const completedFixturesForRound = (filteredFixtures || []).filter(
+                                    // Build from completed fixtures in this round; dedupe by match (same normalized home/away) so duplicate DB rows don't show twice
+                                    const allCompletedForRound = (filteredFixtures || []).filter(
                                         f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
                                         f.actual_home_score != null && f.actual_away_score != null
                                     )
+                                    const seenMatch = new Set()
+                                    const completedFixturesForRound = allCompletedForRound.filter(f => {
+                                        const key = `${norm(f.fixture_home_team)}|${norm(f.fixture_away_team)}`
+                                        if (seenMatch.has(key)) return false
+                                        seenMatch.add(key)
+                                        return true
+                                    })
                                     const completedPredictions = completedFixturesForRound
                                         .map(fixture => {
                                             const pred = predictions.find(p =>
@@ -1138,8 +1170,7 @@ function Members() {
                                         onChange={(e) => {
                                             const id = e.target.value
                                             setAdminSelectedMemberId(id)
-                                            if (id) handleFetchMemberPredictions(Number(id))
-                                            else setAdminMemberPredictions([])
+                                            // Predictions refetched by useEffect when adminSelectedMemberId changes
                                         }}
                                     >
                                         <MenuItem value="">—</MenuItem>
@@ -1156,8 +1187,8 @@ function Members() {
                                         onChange={(e) => {
                                             const r = e.target.value
                                             setAdminPredictionRound(r)
-                                            if (r) getAdminFixturesForRound(Number(r))
-                                            else setAdminFixturesForRound([])
+                                            // Fixtures refetched by useEffect when adminPredictionRound changes
+                                            if (!r) setAdminFixturesForRound([])
                                         }}
                                     >
                                         <MenuItem value="">—</MenuItem>
@@ -1267,10 +1298,17 @@ function Members() {
                                     .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
                                     .replace(/\s+/g, ' ')
                                 )
-                                const completedFixturesForRound = (filteredFixtures || []).filter(
+                                const allCompletedForRoundMobile = (filteredFixtures || []).filter(
                                     f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
                                     f.actual_home_score != null && f.actual_away_score != null
                                 )
+                                const seenMatchMobile = new Set()
+                                const completedFixturesForRound = allCompletedForRoundMobile.filter(f => {
+                                    const key = `${norm(f.fixture_home_team)}|${norm(f.fixture_away_team)}`
+                                    if (seenMatchMobile.has(key)) return false
+                                    seenMatchMobile.add(key)
+                                    return true
+                                })
                                 const completedPredictions = completedFixturesForRound
                                     .map(fixture => {
                                         const pred = predictions.find(p =>
