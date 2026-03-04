@@ -3908,7 +3908,9 @@ def get_league_leaderboard(league_id):
             for g in games:
                 fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
                 if fixture is None:
-                    # Fixture not found (e.g. after dedupe/team name change); use stored game_result so leaderboard keeps historical scores
+                    # Fallback: DB lookup with full normalization (current week + future must count)
+                    fixture = _fixture_for_game(g, league_competition_slug, fixtures_list=None)
+                if fixture is None:
                     gr = getattr(g, 'game_result', None)
                     if gr == 'Win':
                         wins += 1

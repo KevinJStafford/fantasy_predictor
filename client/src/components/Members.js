@@ -1216,12 +1216,12 @@ function Members() {
                                                 const away = fix.fixture_away_team || fix.away_team || ''
                                                 const norm = (s) => (String(s || '').toLowerCase().trim()
                                                     .replace(/&/g, ' and ')
-                                                    .replace(/^afc\s+/, '')
-                                                    .replace(/^fc\s+/, '')
+                                                    .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+                                                    .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
                                                     .replace(/\s+/g, ' ')
                                                 )
                                                 const pred = adminMemberPredictions.find(p => p?.fixture?.id && fix?.id && Number(p.fixture.id) === Number(fix.id))
-                                                    || adminMemberPredictions.find(p => norm(p.home_team) === norm(home) && norm(p.away_team) === norm(away))
+                                                    || adminMemberPredictions.find(p => p?.home_team != null && p?.away_team != null && norm(p.home_team) === norm(home) && norm(p.away_team) === norm(away))
                                                 const actualFromPred = pred?.fixture && pred.fixture.actual_home_score != null && pred.fixture.actual_away_score != null
                                                     ? `${pred.fixture.actual_home_score}–${pred.fixture.actual_away_score}`
                                                     : (fix.actual_home_score != null && fix.actual_away_score != null ? `${fix.actual_home_score}–${fix.actual_away_score}` : '–')
