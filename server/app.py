@@ -3670,13 +3670,14 @@ def _fixture_date_on_or_after_league(fixture, game, league_created_at):
         lc_date = league_created_at.date() if hasattr(league_created_at, 'date') and callable(getattr(league_created_at, 'date')) else league_created_at
         if isinstance(dt_date, date) and isinstance(lc_date, date):
             return dt_date >= lc_date
-        if dt.tzinfo is None and league_created_at.tzinfo:
-            dt = dt.replace(tzinfo=timezone.utc)
-        elif dt.tzinfo and league_created_at.tzinfo is None:
-            league_created_at = league_created_at.replace(tzinfo=timezone.utc)
-    except Exception:
-        pass
-    return dt >= league_created_at
+        if hasattr(dt, 'tzinfo') and hasattr(league_created_at, 'tzinfo'):
+            if dt.tzinfo is None and league_created_at.tzinfo:
+                dt = dt.replace(tzinfo=timezone.utc)
+            elif dt.tzinfo and league_created_at.tzinfo is None:
+                league_created_at = league_created_at.replace(tzinfo=timezone.utc)
+        return dt >= league_created_at
+    except (TypeError, AttributeError):
+        return True
 
 
 def _fixture_matches_league_competition(fixture, league):
@@ -3749,6 +3750,13 @@ def get_league_leaderboard(league_id):
         completed_fixtures = completed_fixtures.all()
         completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
 
+        # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
+        member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
+        all_member_games = Game.query.filter(Game.user_id.in_(member_ids)).all() if member_ids else []
+        games_by_user = {}
+        for g in all_member_games:
+            games_by_user.setdefault(g.user_id, []).append(g)
+
         debug_data = None
         if request.args.get('debug'):
             debug_data = {
@@ -3766,13 +3774,6 @@ def get_league_leaderboard(league_id):
                 'games_per_member': {uid: len(games_by_user.get(uid, [])) for uid in member_ids},
                 'backfill_sample': [{'user_id': lm.user.id, 'wins': lm.backfill_wins, 'draws': lm.backfill_draws, 'losses': lm.backfill_losses} for lm in league.league_memberships[:5] if not getattr(lm.user, 'deleted_at', None)],
             }
-
-        # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
-        member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
-        all_member_games = Game.query.filter(Game.user_id.in_(member_ids)).all() if member_ids else []
-        games_by_user = {}
-        for g in all_member_games:
-            games_by_user.setdefault(g.user_id, []).append(g)
 
         scope = getattr(league, 'leaderboard_scope', 'full_season')
         if scope == 'weekly':
