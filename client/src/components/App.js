@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Switch, Route, Redirect } from "react-router-dom";
 
 import Signup from './Signup';
@@ -15,6 +15,15 @@ import Profile from "./Profile";
 function App() {
   // eslint-disable-next-line no-unused-vars
   const [user, setUser] = useState(null);
+  
+  useEffect(() => {
+    // Backward compatibility for previously sent hash-based reset links.
+    const hash = window.location.hash || "";
+    if (hash.startsWith("#/reset-password")) {
+      const query = hash.includes("?") ? hash.slice(hash.indexOf("?")) : "";
+      window.location.replace(`/reset-password${query}`);
+    }
+  }, []);
 
   return (
     <main>

@@ -3117,7 +3117,8 @@ def forgot_password():
         user.reset_token = secrets.token_urlsafe(32)
         user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         db.session.commit()
-        reset_link = f"{frontend_url.rstrip('/')}#/reset-password?token={user.reset_token}" if frontend_url else None
+        # Use history API route instead of hash route so the client lands on the reset form.
+        reset_link = f"{frontend_url.rstrip('/')}/reset-password?token={user.reset_token}" if frontend_url else None
         to_email = str(user.email)
         # Send email in request; 502 was from Gunicorn worker timeout, not Render proxy. Use gunicorn --timeout 120.
         email_sent = False

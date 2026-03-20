@@ -20,7 +20,8 @@ function ForgotPassword() {
         validationSchema,
         onSubmit: (values) => {
             setError(null);
-            const frontendUrl = window.location.origin + (window.location.pathname || '');
+            // Base origin only so backend can build /reset-password links reliably.
+            const frontendUrl = window.location.origin;
             fetch(apiUrl('/api/v1/forgot-password'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
