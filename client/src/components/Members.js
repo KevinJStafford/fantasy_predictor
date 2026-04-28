@@ -5,7 +5,7 @@ import {useEffect, useState} from 'react'
 import { useLocation, useHistory } from 'react-router-dom'
 import {
     Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel
+    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel, FormControlLabel, Checkbox
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import { apiUrl, authenticatedFetch } from '../utils/api'
@@ -41,6 +41,8 @@ function Members() {
     const [adminPredictionRound, setAdminPredictionRound] = useState('')
     const [adminFixturesForRound, setAdminFixturesForRound] = useState([])
     const [loadingAdminFixtures, setLoadingAdminFixtures] = useState(false)
+    const [roundOverrideDialog, setRoundOverrideDialog] = useState(null) // { fixtureId, home_team, away_team, current_round, new_round, manual_round_override }
+    const [savingRoundOverride, setSavingRoundOverride] = useState(false)
     const [backfillDialogOpen, setBackfillDialogOpen] = useState(false)
     const [backfillJson, setBackfillJson] = useState('')
     const [backfillMessage, setBackfillMessage] = useState(null)
@@ -584,6 +586,48 @@ function Members() {
                 setSyncMessage({ type: 'error', text: err.message || 'Failed to add prediction' })
                 setTimeout(() => setSyncMessage(null), 5000)
             })
+    }
+
+    function handleAdminSetFixtureRound() {
+        if (!leagueId || !roundOverrideDialog?.fixtureId) return
+        const parsedRound = parseInt(roundOverrideDialog.new_round, 10)
+        if (Number.isNaN(parsedRound) || parsedRound <= 0) {
+            setSyncMessage({ type: 'error', text: `${isWorldCup ? 'Day' : 'Week'} must be a positive number.` })
+            setTimeout(() => setSyncMessage(null), 5000)
+            return
+        }
+        setSavingRoundOverride(true)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/fixtures/${roundOverrideDialog.fixtureId}/round`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fixture_round: parsedRound,
+                manual_round_override: !!roundOverrideDialog.manual_round_override,
+            }),
+        })
+            .then(res => {
+                if (!res.ok) return res.json().then(data => { throw new Error(data.error || 'Failed to update fixture week') })
+                return res.json()
+            })
+            .then(data => {
+                setRoundOverrideDialog(null)
+                const oldRound = data?.old_round
+                setSyncMessage({
+                    type: 'success',
+                    text: `${roundOverrideDialog.home_team} vs ${roundOverrideDialog.away_team} moved from ${weekOrDayTitle(oldRound || '?')} to ${weekOrDayTitle(parsedRound)}. ${data?.affected_games ?? 0} saved prediction row(s) updated.`,
+                })
+                setTimeout(() => setSyncMessage(null), 6000)
+                getAvailableRounds()
+                if (adminPredictionRound) getAdminFixturesForRound(Number(adminPredictionRound))
+                if (gameWeek) getFixtures(Number(gameWeek))
+                getPredictions()
+                fetchLeaderboard()
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to update fixture week.' })
+                setTimeout(() => setSyncMessage(null), 5000)
+            })
+            .finally(() => setSavingRoundOverride(false))
     }
 
     function getAdminFixturesForRound(roundNum) {
@@ -1236,34 +1280,50 @@ function Members() {
                                                             {actualFromPred}
                                                         </TableCell>
                                                         <TableCell align="right">
-                                                            {pred ? (
-                                                                <IconButton
-                                                                    size="small"
-                                                                    aria-label="Edit prediction"
-                                                                    onClick={() => setEditPredictionDialog({
-                                                                        gameId: pred.id,
-                                                                        home_team: pred.home_team,
-                                                                        away_team: pred.away_team,
-                                                                        home_team_score: pred.home_team_score ?? 0,
-                                                                        away_team_score: pred.away_team_score ?? 0
-                                                                    })}
-                                                                >
-                                                                    <EditIcon fontSize="small" />
-                                                                </IconButton>
-                                                            ) : (
+                                                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
                                                                 <Button
                                                                     size="small"
-                                                                    variant="outlined"
-                                                                    onClick={() => setAddPredictionDialog({
+                                                                    variant="text"
+                                                                    onClick={() => setRoundOverrideDialog({
+                                                                        fixtureId: fix.id,
                                                                         home_team: home,
                                                                         away_team: away,
-                                                                        home_team_score: 0,
-                                                                        away_team_score: 0
+                                                                        current_round: fix.fixture_round,
+                                                                        new_round: String(fix.fixture_round ?? ''),
+                                                                        manual_round_override: true,
                                                                     })}
                                                                 >
-                                                                    Add prediction
+                                                                    Set {isWorldCup ? 'day' : 'week'}
                                                                 </Button>
-                                                            )}
+                                                                {pred ? (
+                                                                    <IconButton
+                                                                        size="small"
+                                                                        aria-label="Edit prediction"
+                                                                        onClick={() => setEditPredictionDialog({
+                                                                            gameId: pred.id,
+                                                                            home_team: pred.home_team,
+                                                                            away_team: pred.away_team,
+                                                                            home_team_score: pred.home_team_score ?? 0,
+                                                                            away_team_score: pred.away_team_score ?? 0
+                                                                        })}
+                                                                    >
+                                                                        <EditIcon fontSize="small" />
+                                                                    </IconButton>
+                                                                ) : (
+                                                                    <Button
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        onClick={() => setAddPredictionDialog({
+                                                                            home_team: home,
+                                                                            away_team: away,
+                                                                            home_team_score: 0,
+                                                                            away_team_score: 0
+                                                                        })}
+                                                                    >
+                                                                        Add prediction
+                                                                    </Button>
+                                                                )}
+                                                            </Box>
                                                         </TableCell>
                                                     </TableRow>
                                                 )
@@ -1470,6 +1530,47 @@ function Members() {
                             )}
                         >
                             Save
+                        </Button>
+                    </DialogActions>
+                </>
+            )}
+        </Dialog>
+
+        {/* Set fixture week/day (admin) */}
+        <Dialog open={!!roundOverrideDialog} onClose={() => !savingRoundOverride && setRoundOverrideDialog(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>Set {isWorldCup ? 'day' : 'game week'}</DialogTitle>
+            {roundOverrideDialog && (
+                <>
+                    <DialogContent>
+                        <Typography variant="body2" sx={{ mb: 2 }}>
+                            {roundOverrideDialog.home_team} vs {roundOverrideDialog.away_team}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                            Current: {roundOverrideDialog.current_round ? weekOrDayTitle(roundOverrideDialog.current_round) : 'Not set'}
+                        </Typography>
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label={isWorldCup ? 'Day number' : 'Week number'}
+                            value={roundOverrideDialog.new_round}
+                            onChange={(e) => setRoundOverrideDialog(prev => ({ ...prev, new_round: e.target.value }))}
+                            inputProps={{ min: 1 }}
+                        />
+                        <FormControlLabel
+                            sx={{ mt: 1 }}
+                            control={(
+                                <Checkbox
+                                    checked={!!roundOverrideDialog.manual_round_override}
+                                    onChange={(e) => setRoundOverrideDialog(prev => ({ ...prev, manual_round_override: e.target.checked }))}
+                                />
+                            )}
+                            label={`Lock ${isWorldCup ? 'day' : 'week'} override (prevent sync from resetting it)`}
+                        />
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={() => setRoundOverrideDialog(null)} disabled={savingRoundOverride}>Cancel</Button>
+                        <Button onClick={handleAdminSetFixtureRound} variant="contained" disabled={savingRoundOverride}>
+                            {savingRoundOverride ? 'Saving...' : 'Save'}
                         </Button>
                     </DialogActions>
                 </>

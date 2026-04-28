@@ -130,6 +130,8 @@ class Fixture(db.Model, SerializerMixin):
     actual_home_score = db.Column(db.Integer, nullable=True)
     actual_away_score = db.Column(db.Integer, nullable=True)
     is_completed = db.Column(db.Boolean, default=False)
+    # When True, fixture sync will not overwrite fixture_round.
+    manual_round_override = db.Column(db.Boolean, nullable=False, default=False)
 
     def __repr__(self):
         return f'<Fixture {self.id}: {self.fixture_home_team} vs {self.fixture_away_team}>'

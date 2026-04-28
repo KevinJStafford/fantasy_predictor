@@ -1344,7 +1344,8 @@ def _sync_fixtures_espn(league_slug):
                         existing = c
                         break
         if existing:
-            existing.fixture_round = fixture_round
+            if not getattr(existing, 'manual_round_override', False):
+                existing.fixture_round = fixture_round
             if item['fixture_date']:
                 existing.fixture_date = item['fixture_date']
             existing.actual_home_score = item['home_score']
@@ -1487,7 +1488,8 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
                             existing = c
                             break
         if existing:
-            existing.fixture_round = fixture_round
+            if not getattr(existing, 'manual_round_override', False):
+                existing.fixture_round = fixture_round
             if fixture_date:
                 existing.fixture_date = fixture_date
             existing.actual_home_score = home_score
@@ -1947,7 +1949,11 @@ def sync_fixtures():
             if existing_fixture:
                 # Update existing fixture
                 existing_fixture.competition_slug = 'eng.1'
-                if fixture_round is not None and existing_fixture.fixture_round != fixture_round:
+                if (
+                    not getattr(existing_fixture, 'manual_round_override', False)
+                    and fixture_round is not None
+                    and existing_fixture.fixture_round != fixture_round
+                ):
                     existing_fixture.fixture_round = fixture_round
                 if fixture_date:
                     existing_fixture.fixture_date = fixture_date
@@ -3533,6 +3539,82 @@ def admin_update_prediction(league_id, game_id):
     except Exception as e:
         db.session.rollback()
         print(f"Error updating prediction: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/fixtures/<int:fixture_id>/round', methods=['PATCH'])
+def admin_update_fixture_round(league_id, fixture_id):
+    """Admin only: manually set fixture round/day and optionally lock it against future sync updates.
+
+    Body:
+      - fixture_round (required int)
+      - manual_round_override (optional bool, default true)
+    """
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can update fixture game week'}, 403)
+
+        league = League.query.get(league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+
+        fixture = Fixture.query.get(fixture_id)
+        if not fixture:
+            return make_response({'error': 'Fixture not found'}, 404)
+
+        # Prevent editing fixtures outside this league's competition context.
+        if not _fixture_matches_league_competition(fixture, league):
+            return make_response({'error': 'Fixture does not belong to this league competition'}, 400)
+
+        data = request.get_json() or {}
+        if 'fixture_round' not in data:
+            return make_response({'error': 'fixture_round is required'}, 400)
+        try:
+            new_round = int(data.get('fixture_round'))
+        except (TypeError, ValueError):
+            return make_response({'error': 'fixture_round must be an integer'}, 400)
+        if new_round <= 0:
+            return make_response({'error': 'fixture_round must be greater than 0'}, 400)
+
+        lock_round = data.get('manual_round_override')
+        if lock_round is None:
+            lock_round = True
+        elif isinstance(lock_round, str):
+            lock_round = lock_round.strip().lower() in ('1', 'true', 'yes', 'on')
+        else:
+            lock_round = bool(lock_round)
+
+        old_round = fixture.fixture_round
+        fixture.fixture_round = new_round
+        fixture.manual_round_override = lock_round
+
+        # Keep stored game week labels aligned for existing predictions for this match.
+        affected_games = Game.query.filter_by(
+            home_team=fixture.fixture_home_team,
+            away_team=fixture.fixture_away_team,
+        ).all()
+        for g in affected_games:
+            g.game_week_name = f"Week {new_round}"
+            if fixture.fixture_date:
+                g.game_week = fixture.fixture_date
+
+        db.session.commit()
+        return make_response({
+            'message': 'Fixture game week updated',
+            'fixture': fixture.to_dict(),
+            'old_round': old_round,
+            'new_round': new_round,
+            'manual_round_override': fixture.manual_round_override,
+            'affected_games': len(affected_games),
+        }, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating fixture round: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
