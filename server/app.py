@@ -1129,6 +1129,26 @@ def _normalize_team_name_for_match(name):
     return s.strip()
 
 
+def _propagate_fixture_team_names_to_games(old_home, old_away, new_home, new_away, fixture_date=None):
+    """Update prediction rows when sync replaces placeholder team names (e.g. playoff path winners)."""
+    if not old_home or not old_away:
+        return
+    if old_home == new_home and old_away == new_away:
+        return
+    games = Game.query.filter_by(home_team=old_home, away_team=old_away).all()
+    if not games:
+        for g in Game.query.all():
+            if ((g.home_team or '').strip() == (old_home or '').strip() and
+                    (g.away_team or '').strip() == (old_away or '').strip()):
+                games.append(g)
+    for game in games:
+        if fixture_date and game.game_week:
+            if abs((game.game_week - fixture_date).total_seconds()) > 86400:
+                continue
+        game.home_team = new_home
+        game.away_team = new_away
+
+
 def _sync_fixtures_espn(league_slug):
     """Fetch fixtures from ESPN API for a given league (e.g. esp.1, fifa.world). Returns (added, updated, seen, error)."""
     comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('espn_slug') == league_slug or c.get('slug') == league_slug), None)
@@ -1344,15 +1364,20 @@ def _sync_fixtures_espn(league_slug):
                         existing = c
                         break
         if existing:
+            old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
             if not getattr(existing, 'manual_round_override', False):
                 existing.fixture_round = fixture_round
             if item['fixture_date']:
                 existing.fixture_date = item['fixture_date']
+            existing.fixture_home_team = item['home_team']
+            existing.fixture_away_team = item['away_team']
             existing.actual_home_score = item['home_score']
             existing.actual_away_score = item['away_score']
             existing.is_completed = item['is_completed']
             if external_id:
                 existing.external_id = external_id
+            _propagate_fixture_team_names_to_games(
+                old_home, old_away, item['home_team'], item['away_team'], item.get('fixture_date'))
             fixtures_updated += 1
         else:
             new_f = Fixture(
@@ -1488,16 +1513,20 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
                             existing = c
                             break
         if existing:
+            old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
             if not getattr(existing, 'manual_round_override', False):
                 existing.fixture_round = fixture_round
             if fixture_date:
                 existing.fixture_date = fixture_date
+            existing.fixture_home_team = home_team
+            existing.fixture_away_team = away_team
             existing.actual_home_score = home_score
             existing.actual_away_score = away_score
             existing.is_completed = is_completed
             if external_id:
                 existing.external_id = external_id
             existing.competition_slug = competition_slug
+            _propagate_fixture_team_names_to_games(old_home, old_away, home_team, away_team, fixture_date)
             fixtures_updated += 1
         else:
             new_f = Fixture(
@@ -1948,6 +1977,7 @@ def sync_fixtures():
             
             if existing_fixture:
                 # Update existing fixture
+                old_home, old_away = existing_fixture.fixture_home_team, existing_fixture.fixture_away_team
                 existing_fixture.competition_slug = 'eng.1'
                 if (
                     not getattr(existing_fixture, 'manual_round_override', False)
@@ -1957,6 +1987,9 @@ def sync_fixtures():
                     existing_fixture.fixture_round = fixture_round
                 if fixture_date:
                     existing_fixture.fixture_date = fixture_date
+                existing_fixture.fixture_home_team = home_team
+                existing_fixture.fixture_away_team = away_team
+                _propagate_fixture_team_names_to_games(old_home, old_away, home_team, away_team, fixture_date)
                 fixtures_updated += 1
             else:
                 # Create new fixture
