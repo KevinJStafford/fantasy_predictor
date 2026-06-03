@@ -10,7 +10,7 @@ class LeagueMembership(db.Model, SerializerMixin):
     __tablename__ = 'league_memberships'
 
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
-    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id', ondelete='CASCADE'), primary_key=True)
     display_name = db.Column(db.String, nullable=False)  # unique per league
     role = db.Column(db.String, nullable=False, default='player')  # 'admin' | 'player'
     joined_at = db.Column(db.DateTime, server_default=db.func.now())
@@ -140,11 +140,11 @@ class LeagueWeekWinner(db.Model, SerializerMixin):
     """Records which member(s) won a given round in a league (for weekly leaderboard). Ties = multiple rows."""
     __tablename__ = 'league_week_winners'
 
-    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), primary_key=True)
+    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id', ondelete='CASCADE'), primary_key=True)
     fixture_round = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
 
-    league = db.relationship('League', backref=db.backref('week_winners', lazy='dynamic'))
+    league = db.relationship('League', back_populates='week_winners')
     user = db.relationship('User', backref=db.backref('league_week_wins', lazy='dynamic'))
 
 
@@ -169,7 +169,12 @@ class League(db.Model, SerializerMixin):
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     # Relationships: members via LeagueMembership (each has display_name per league)
-    league_memberships = db.relationship('LeagueMembership', back_populates='league')
+    league_memberships = db.relationship(
+        'LeagueMembership', back_populates='league', cascade='all, delete-orphan'
+    )
+    week_winners = db.relationship(
+        'LeagueWeekWinner', back_populates='league', cascade='all, delete-orphan', lazy='dynamic'
+    )
     members = association_proxy('league_memberships', 'user')
 
     def to_dict(self, rules=None):

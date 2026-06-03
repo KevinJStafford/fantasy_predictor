@@ -3583,7 +3583,9 @@ def delete_league(league_id):
         league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
-        LeagueMembership.query.filter_by(league_id=league_id).delete()
+        LeagueWeekWinner.query.filter_by(league_id=league_id).delete(synchronize_session=False)
+        LeagueMembership.query.filter_by(league_id=league_id).delete(synchronize_session=False)
+        db.session.flush()
         db.session.delete(league)
         db.session.commit()
         return make_response({'message': 'League deleted'}, 200)

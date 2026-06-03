@@ -39,6 +39,8 @@ function Members() {
     const [currentUser, setCurrentUser] = useState(null)
     const [leagueDetail, setLeagueDetail] = useState(null)
     const [deleteLeagueDialog, setDeleteLeagueDialog] = useState(false)
+    const [deletingLeague, setDeletingLeague] = useState(false)
+    const [deleteLeagueError, setDeleteLeagueError] = useState(null)
     const [removingMemberId, setRemovingMemberId] = useState(null)
     const [updatingRoleId, setUpdatingRoleId] = useState(null)
     const [adminMemberPredictions, setAdminMemberPredictions] = useState([])
@@ -540,22 +542,34 @@ function Members() {
             })
     }
 
-    function handleDeleteLeague() {
-        if (!leagueId) return
-        authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
-            .then(res => {
-                if (res.ok) {
-                    removeLeagueFromSnapshot(leagueId)
-                    setDeleteLeagueDialog(false)
-                    history.push('/leagues')
-                } else {
-                    return res.json().then(data => { throw new Error(data.error || 'Failed to delete league') })
+    async function handleDeleteLeague() {
+        if (!leagueId || deletingLeague) return
+        setDeletingLeague(true)
+        setDeleteLeagueError(null)
+        try {
+            const res = await authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
+            let data = null
+            const body = await res.text()
+            if (body) {
+                try {
+                    data = JSON.parse(body)
+                } catch (_) {
+                    /* non-JSON error body */
                 }
-            })
-            .catch(err => {
-                setSyncMessage({ type: 'error', text: err.message || 'Failed to delete league' })
-                setTimeout(() => setSyncMessage(null), 5000)
-            })
+            }
+            if (!res.ok) {
+                throw new Error(data?.error || `Failed to delete league (${res.status})`)
+            }
+            removeLeagueFromSnapshot(leagueId)
+            setDeleteLeagueDialog(false)
+            history.push('/leagues')
+        } catch (err) {
+            const message = err.message || 'Failed to delete league'
+            setDeleteLeagueError(message)
+            setSyncMessage({ type: 'error', text: message })
+        } finally {
+            setDeletingLeague(false)
+        }
     }
 
     function handleRemoveMember(memberUserId) {
@@ -792,7 +806,10 @@ function Members() {
                         variant="outlined"
                         color="error"
                         size="small"
-                        onClick={() => setDeleteLeagueDialog(true)}
+                        onClick={() => {
+                            setDeleteLeagueError(null)
+                            setDeleteLeagueDialog(true)
+                        }}
                     >
                         Delete league
                     </Button>
@@ -1552,14 +1569,36 @@ function Members() {
         </Dialog>
 
         {/* Delete league confirmation */}
-        <Dialog open={deleteLeagueDialog} onClose={() => setDeleteLeagueDialog(false)}>
+        <Dialog
+            open={deleteLeagueDialog}
+            onClose={() => {
+                if (!deletingLeague) {
+                    setDeleteLeagueDialog(false)
+                    setDeleteLeagueError(null)
+                }
+            }}
+        >
             <DialogTitle>Delete league?</DialogTitle>
             <DialogContent>
                 <Typography>This will remove the league and all members. This cannot be undone.</Typography>
+                {deleteLeagueError && (
+                    <Alert severity="error" sx={{ mt: 2 }}>
+                        {deleteLeagueError}
+                    </Alert>
+                )}
             </DialogContent>
             <DialogActions>
-                <Button onClick={() => setDeleteLeagueDialog(false)}>Cancel</Button>
-                <Button color="error" variant="contained" onClick={handleDeleteLeague}>Delete league</Button>
+                <Button onClick={() => setDeleteLeagueDialog(false)} disabled={deletingLeague}>
+                    Cancel
+                </Button>
+                <Button
+                    color="error"
+                    variant="contained"
+                    onClick={handleDeleteLeague}
+                    disabled={deletingLeague}
+                >
+                    {deletingLeague ? 'Deleting…' : 'Delete league'}
+                </Button>
             </DialogActions>
         </Dialog>
 
