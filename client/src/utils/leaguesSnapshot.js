@@ -62,7 +62,18 @@ export function clearLeaguesSnapshot() {
     }
 }
 
-/** Competition slug for API calls while viewing a league (cache-aware). */
+/** Competition slug from ?league= id in URL (snapshot), for initial state before React effects run. */
+export function competitionSlugFromLeagueUrl(search) {
+    const params = new URLSearchParams(search || '')
+    const leagueParam = params.get('league')
+    if (!leagueParam || Number.isNaN(parseInt(leagueParam, 10))) return null
+    return getLeagueFromSnapshot(parseInt(leagueParam, 10))?.competition_slug || null
+}
+
+/**
+ * Competition slug for API calls while viewing a league (cache-aware).
+ * Returns null while league metadata is still loading — avoids defaulting to eng.1.
+ */
 export function competitionSlugForLeagueView(leagueId, leagueDetail, selectedCompetition) {
     if (!leagueId) return selectedCompetition || 'eng.1'
     const id = Number(leagueId)
@@ -72,7 +83,9 @@ export function competitionSlugForLeagueView(leagueId, leagueDetail, selectedCom
     const cached = getLeagueFromSnapshot(id)
     if (cached?.competition_slug) return cached.competition_slug
     if (leagueDetail?.competition_slug) return leagueDetail.competition_slug
-    return selectedCompetition || 'eng.1'
+    // League known but slug missing (legacy) — only then allow EPL fallback
+    if (Number(leagueDetail?.id) === id) return selectedCompetition || 'eng.1'
+    return null
 }
 
 export function applyLeagueCompetitionToState(league, setSelectedCompetition) {

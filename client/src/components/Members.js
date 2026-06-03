@@ -12,6 +12,7 @@ import { apiUrl, authenticatedFetch } from '../utils/api'
 import {
     applyLeagueCompetitionToState,
     competitionSlugForLeagueView,
+    competitionSlugFromLeagueUrl,
     fetchLeagueById,
     getLeagueFromSnapshot,
     removeLeagueFromSnapshot,
@@ -57,7 +58,9 @@ function Members() {
     const [loadingStandings, setLoadingStandings] = useState(false)
     const [standingsError, setStandingsError] = useState(null)
     const [competitions, setCompetitions] = useState([])
-    const [selectedCompetition, setSelectedCompetition] = useState('eng.1')
+    const [selectedCompetition, setSelectedCompetition] = useState(
+        () => competitionSlugFromLeagueUrl(location.search) || 'eng.1'
+    )
     const [displayNameDialogOpen, setDisplayNameDialogOpen] = useState(false)
     const [displayNameDraft, setDisplayNameDraft] = useState('')
     const [displayNameError, setDisplayNameError] = useState(null)
@@ -81,6 +84,8 @@ function Members() {
         const leagueParam = params.get('league')
         if (leagueParam && !Number.isNaN(parseInt(leagueParam, 10))) {
             setLeagueId(parseInt(leagueParam, 10))
+            const slug = competitionSlugFromLeagueUrl(location.search)
+            if (slug) setSelectedCompetition(slug)
         } else {
             setLeagueId(null)
         }
@@ -181,16 +186,16 @@ function Members() {
             .finally(() => setLoadingStandings(false))
     }, [effectiveCompetition])
 
-    // On league page load: run check-results so W/D/L are up to date. (Admin score refresh runs in league-fetch effect when league.is_admin.)
+    // On league page load: run check-results once competition is known. (Admin sync runs in league-fetch effect.)
     useEffect(() => {
-        if (!leagueId) return
+        if (!leagueId || !effectiveCompetition) return
         authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
             .then(() => {
                 getPredictions()
                 fetchLeaderboard()
             })
             .catch(() => {})
-    }, [leagueId])
+    }, [leagueId, effectiveCompetition])
 
     // Refetch admin member predictions when member or round changes (ensures mobile Select always loads correct member's picks)
     useEffect(() => {
@@ -685,32 +690,29 @@ function Members() {
             .finally(() => setLoadingAdminFixtures(false))
     }
 
-    // Load available rounds and predictions on mount (skip predictions if league in URL - league effect will fetch with league_id to avoid race)
+    // Load rounds/predictions on mount only when not opening a specific league (league effect handles ?league=)
     useEffect(() => {
-        getAvailableRounds()
         const hasLeagueInUrl = /\bleague=\d+/.test(location.search)
-        if (!hasLeagueInUrl) getPredictions()
-    }, [])
-
-    // When not viewing a league, load current round once on mount (league view uses effect below)
-    useEffect(() => {
-        if (!leagueId) loadCurrentRoundAndFixtures()
+        if (hasLeagueInUrl) return
+        getAvailableRounds()
+        getPredictions()
+        loadCurrentRoundAndFixtures()
     }, [])
 
     // When league is selected, refresh default game week and predictions (with league_id so fixture resolution uses correct competition)
     useEffect(() => {
-        if (leagueId && leagueDetail?.id === leagueId) {
-            loadCurrentRoundAndFixtures()
-            getAvailableRounds()
-            getPredictions()
-        }
-    }, [leagueId, leagueDetail])
+        if (!leagueId || leagueDetail?.id !== leagueId || !effectiveCompetition) return
+        loadCurrentRoundAndFixtures()
+        getAvailableRounds()
+        getPredictions()
+    }, [leagueId, leagueDetail, effectiveCompetition])
 
-    // When competition (league) changes, refresh rounds and current week/fixtures
+    // When competition changes (non-league picker or after league loads), refresh rounds and fixtures
     useEffect(() => {
+        if (leagueId && !effectiveCompetition) return
         getAvailableRounds()
         loadCurrentRoundAndFixtures()
-    }, [selectedCompetition])
+    }, [selectedCompetition, leagueId, effectiveCompetition])
 
     // When user selects a different week from dropdown (weekly leagues), refetch leaderboard for that week
     useEffect(() => {
