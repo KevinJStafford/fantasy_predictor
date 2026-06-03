@@ -23,7 +23,7 @@ import { authenticatedFetch, apiUrl } from '../utils/api'
 import { getToken, removeToken } from '../utils/auth'
 import { getAuthHeaders } from '../utils/auth'
 import { getCachedLeagues, refreshUserLeagues, writeLeaguesSnapshot } from '../utils/leaguesSnapshot'
-import { fetchCurrentUser } from '../utils/currentUserSnapshot'
+import { fetchCurrentUser, writeCurrentUserSnapshot } from '../utils/currentUserSnapshot'
 
 function Profile() {
     const history = useHistory()
