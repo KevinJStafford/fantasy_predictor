@@ -682,6 +682,37 @@ def _current_season_start_for_competition(comp_filter):
     return season_start
 
 
+def _fixture_not_completed_filter():
+    """True for fixtures that have not finished (ESPN may store 0-0 placeholders before kickoff)."""
+    return or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
+
+
+def _lowest_incomplete_fixture_round(comp_filter, season_start=None):
+    """Smallest fixture_round with at least one non-completed fixture; None if all complete."""
+    from sqlalchemy import distinct
+    q = (
+        db.session.query(distinct(Fixture.fixture_round))
+        .filter(Fixture.fixture_round.isnot(None))
+        .filter(_fixture_not_completed_filter())
+    )
+    if comp_filter is not None:
+        q = q.filter(comp_filter)
+    if season_start is not None:
+        q = q.filter(Fixture.fixture_date >= season_start)
+    rounds = sorted([int(r[0]) for r in q.all() if r[0] is not None])
+    return rounds[0] if rounds else None
+
+
+def _max_fixture_round(comp_filter, season_start=None):
+    q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
+    if comp_filter is not None:
+        q = q.filter(comp_filter)
+    if season_start is not None:
+        q = q.filter(Fixture.fixture_date >= season_start)
+    row = q.first()
+    return int(row[0]) if row and row[0] is not None else None
+
+
 @app.route('/api/v1/competitions', methods=['GET'])
 def get_competitions():
     """List supported competitions (leagues) for predictions."""
@@ -898,37 +929,9 @@ def get_next_incomplete_round():
         competition = request.args.get('competition') or None
         comp_filter = _fixture_query_competition(competition)
         season_start = _current_season_start_for_competition(comp_filter)
-        if competition == 'fifa.world':
-            q = db.session.query(Fixture.fixture_round).filter(Fixture.is_completed == False).filter(Fixture.fixture_round.isnot(None))
-            if comp_filter is not None:
-                q = q.filter(comp_filter)
-            if season_start is not None:
-                q = q.filter(Fixture.fixture_date >= season_start)
-            next_round_row = q.order_by(Fixture.fixture_round.asc()).first()
-            if next_round_row:
-                return make_response({'round': next_round_row[0]}, 200)
-            max_q = db.session.query(db.func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
-            if comp_filter is not None:
-                max_q = max_q.filter(comp_filter)
-            if season_start is not None:
-                max_q = max_q.filter(Fixture.fixture_date >= season_start)
-            max_row = max_q.first()
-            return make_response({'round': max_row[0] if max_row and max_row[0] is not None else None}, 200)
-        q = db.session.query(Fixture.fixture_round).filter(Fixture.is_completed == False).filter(Fixture.fixture_round.isnot(None))
-        if comp_filter is not None:
-            q = q.filter(comp_filter)
-        if season_start is not None:
-            q = q.filter(Fixture.fixture_date >= season_start)
-        next_round_row = q.order_by(Fixture.fixture_round.asc()).first()
-        if next_round_row:
-            return make_response({'round': next_round_row[0]}, 200)
-        max_q = db.session.query(db.func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
-        if comp_filter is not None:
-            max_q = max_q.filter(comp_filter)
-        if season_start is not None:
-            max_q = max_q.filter(Fixture.fixture_date >= season_start)
-        max_round_row = max_q.first()
-        round_num = max_round_row[0] if max_round_row and max_round_row[0] is not None else None
+        round_num = _lowest_incomplete_fixture_round(comp_filter, season_start)
+        if round_num is None:
+            round_num = _max_fixture_round(comp_filter, season_start)
         return make_response({'round': round_num}, 200)
     except Exception as e:
         import traceback
@@ -948,64 +951,26 @@ def get_current_round():
         competition = request.args.get('competition') or None
         comp_filter = _fixture_query_competition(competition)
         season_start = _current_season_start_for_competition(comp_filter)
-        if competition == 'fifa.world':
+        round_num = _lowest_incomplete_fixture_round(comp_filter, season_start)
+        if round_num is None:
+            round_num = _max_fixture_round(comp_filter, season_start)
+        payload = {'round': round_num}
+        if request.args.get('debug'):
             incomplete_query = (
                 db.session.query(distinct(Fixture.fixture_round))
                 .filter(Fixture.fixture_round.isnot(None))
-                .filter(or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None)))
-                .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
+                .filter(_fixture_not_completed_filter())
             )
             if comp_filter is not None:
                 incomplete_query = incomplete_query.filter(comp_filter)
             if season_start is not None:
                 incomplete_query = incomplete_query.filter(Fixture.fixture_date >= season_start)
-            incomplete_rows = incomplete_query.all()
-            incomplete_rounds = sorted([int(r[0]) for r in incomplete_rows if r[0] is not None])
-            if incomplete_rounds:
-                return make_response({'round': incomplete_rounds[0]}, 200)
-            max_q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
-            if comp_filter is not None:
-                max_q = max_q.filter(comp_filter)
-            if season_start is not None:
-                max_q = max_q.filter(Fixture.fixture_date >= season_start)
-            max_row = max_q.first()
-            round_num = max_row[0] if max_row and max_row[0] is not None else None
-            return make_response({'round': round_num}, 200)
-        incomplete_query = (
-            db.session.query(distinct(Fixture.fixture_round))
-            .filter(Fixture.fixture_round.isnot(None))
-            .filter(or_(Fixture.actual_home_score.is_(None), Fixture.actual_away_score.is_(None)))
-            .filter(or_(Fixture.is_completed == False, Fixture.is_completed.is_(None)))
-        )
-        if comp_filter is not None:
-            incomplete_query = incomplete_query.filter(comp_filter)
-        if season_start is not None:
-            incomplete_query = incomplete_query.filter(Fixture.fixture_date >= season_start)
-        incomplete_rows = incomplete_query.all()
-        incomplete_rounds = sorted([int(r[0]) for r in incomplete_rows if r[0] is not None])
-        max_q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
-        if comp_filter is not None:
-            max_q = max_q.filter(comp_filter)
-        if season_start is not None:
-            max_q = max_q.filter(Fixture.fixture_date >= season_start)
-        max_row = max_q.first()
-        max_r = int(max_row[0]) if max_row and max_row[0] is not None else None
-        if incomplete_rounds:
-            round_num = incomplete_rounds[0]
-        else:
-            round_num = max_r
-        payload = {'round': round_num}
-        if request.args.get('debug'):
-            max_for_debug = max_r
-            if max_for_debug is None and incomplete_rounds:
-                max_q = db.session.query(func.max(Fixture.fixture_round)).filter(Fixture.fixture_round.isnot(None))
-                if comp_filter is not None:
-                    max_q = max_q.filter(comp_filter)
-                max_row = max_q.first()
-                max_for_debug = int(max_row[0]) if max_row and max_row[0] is not None else None
+            incomplete_rounds = sorted(
+                [int(r[0]) for r in incomplete_query.all() if r[0] is not None]
+            )
             payload['_debug'] = {
                 'incomplete_rounds': incomplete_rounds[:15],
-                'max_round': max_for_debug,
+                'max_round': _max_fixture_round(comp_filter, season_start),
             }
         resp = make_response(payload, 200)
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
