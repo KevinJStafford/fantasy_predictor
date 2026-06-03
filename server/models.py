@@ -162,6 +162,8 @@ class League(db.Model, SerializerMixin):
     competition_slug = db.Column(db.String, nullable=True)
     # Enable "Ask AI" score suggestions for this league (can be pay-gated later)
     ai_predictions_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    # When set, leaderboard only counts fixtures/games on or after this time (new season in same league).
+    season_started_at = db.Column(db.DateTime, nullable=True)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
@@ -180,6 +182,7 @@ class League(db.Model, SerializerMixin):
             'leaderboard_scope': getattr(self, 'leaderboard_scope', 'full_season'),
             'competition_slug': getattr(self, 'competition_slug', None),
             'ai_predictions_enabled': getattr(self, 'ai_predictions_enabled', False),
+            'season_started_at': self.season_started_at.isoformat() if getattr(self, 'season_started_at', None) else None,
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

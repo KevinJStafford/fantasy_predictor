@@ -16,10 +16,10 @@ os.environ.setdefault('FLASK_ENV', 'testing')
 from config import app, db, bcrypt  # noqa: E402
 import app as flask_app  # noqa: E402, F401 — registers routes on config.app
 
-from models import User, League, LeagueMembership  # noqa: E402
+from models import User, League, LeagueMembership, LeagueWeekWinner  # noqa: E402
 
 # Only tables needed for league endpoint tests (avoid sqlite + unnamed Fixture indexes).
-_TEST_TABLES = (User.__table__, League.__table__, LeagueMembership.__table__)
+_TEST_TABLES = (User.__table__, League.__table__, LeagueMembership.__table__, LeagueWeekWinner.__table__)
 
 
 def _create_test_tables():

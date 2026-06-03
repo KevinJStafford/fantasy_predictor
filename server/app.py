@@ -1545,6 +1545,51 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
     return fixtures_added, fixtures_updated, len(matches), None
 
 
+def _sync_fixtures_for_competition_slug(comp_slug):
+    """Pull fixtures for a competition slug. Returns success dict or {'error': ...}."""
+    comp_slug = (comp_slug or 'eng.1').strip()
+    if not REQUESTS_AVAILABLE:
+        return {'error': 'Requests module is not available'}
+    comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('slug') == comp_slug), None)
+    if not comp:
+        return {'error': f'Unknown competition: {comp_slug}'}
+    try:
+        if comp.get('source') == 'espn':
+            slug = comp.get('espn_slug') or comp_slug
+            added, updated, seen, err = _sync_fixtures_espn(slug)
+            if err:
+                return {'error': err}
+            db.session.commit()
+            return {
+                'message': 'Fixtures synced successfully (ESPN)',
+                'source': 'espn',
+                'competition': comp_slug,
+                'added': added,
+                'updated': updated,
+                'fixtures_seen': seen,
+                'total_written': added + updated,
+            }
+        if comp.get('source') == 'football_data':
+            code = comp.get('football_data_code') or 'PL'
+            added, updated, seen, err = _sync_fixtures_football_data(code, comp_slug)
+            if err:
+                return {'error': err}
+            db.session.commit()
+            return {
+                'message': 'Fixtures synced successfully (football-data.org)',
+                'source': 'football_data',
+                'competition': comp_slug,
+                'added': added,
+                'updated': updated,
+                'fixtures_seen': seen,
+                'total_written': added + updated,
+            }
+        return {'error': 'Fixture sync is not available for this competition'}
+    except Exception as e:
+        db.session.rollback()
+        return {'error': str(e)}
+
+
 @app.route('/api/v1/fixtures/sync', methods=['POST'])
 def sync_fixtures():
     """
@@ -3796,8 +3841,18 @@ def admin_create_member_prediction(league_id, member_user_id):
         return make_response({'error': str(e)}, 500)
 
 
+def _league_scoring_start_at(league):
+    """Datetime cutoff for leaderboard: fixtures/games on or after this count toward standings."""
+    if not league:
+        return None
+    started = getattr(league, 'season_started_at', None)
+    if started is not None:
+        return started
+    return getattr(league, 'created_at', None)
+
+
 def _fixture_date_on_or_after_league(fixture, game, league_created_at):
-    """True if the fixture/game date is on or after league creation (so it counts for this league's leaderboard)."""
+    """True if the fixture/game date is on or after the league scoring start (creation or new season)."""
     if league_created_at is None:
         return True
     dt = None
@@ -3837,7 +3892,7 @@ def _fixture_matches_league_competition(fixture, league):
 @app.route('/api/v1/leagues/<int:league_id>/leaderboard', methods=['GET'])
 def get_league_leaderboard(league_id):
     """Get leaderboard for a league - players ordered by points.
-    Only fixtures on or after league.created_at are counted (scoring starts when the league was created)."""
+    Only fixtures on or after league scoring start (season_started_at or created_at) are counted."""
     try:
         user_id = get_current_user_id()
         if not user_id:
@@ -3847,7 +3902,7 @@ def get_league_leaderboard(league_id):
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
-        league_created_at = getattr(league, 'created_at', None)
+        league_created_at = _league_scoring_start_at(league)
         
         # Check if user is a member (and not soft-deleted)
         user = get_active_user_by_id(user_id)
@@ -4152,6 +4207,71 @@ def get_league_leaderboard(league_id):
         return make_response(resp, 200)
     except Exception as e:
         print(f"Error fetching leaderboard: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
+@app.route('/api/v1/leagues/<int:league_id>/start-new-season', methods=['POST'])
+def start_new_league_season(league_id):
+    """Admin only: reset league standings for a new season in the same league.
+    Sets season_started_at (so prior picks no longer count), clears backfill and weekly winners.
+    Optional body: { "sync_fixtures": true } to pull the latest schedule for this league's competition."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+        if not is_league_admin(user_id, league_id):
+            return make_response({'error': 'Only league admins can start a new season'}, 403)
+        league = db.session.get(League, league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+
+        data = request.get_json() or {}
+        season_start = datetime.now(timezone.utc)
+        if data.get('season_start'):
+            try:
+                raw = data['season_start']
+                if isinstance(raw, str):
+                    parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+                else:
+                    parsed = raw
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                season_start = parsed
+            except (TypeError, ValueError):
+                return make_response({'error': 'Invalid season_start (use ISO 8601 datetime)'}, 400)
+
+        league.season_started_at = season_start
+        members_reset = 0
+        for lm in league.league_memberships:
+            lm.backfill_wins = None
+            lm.backfill_draws = None
+            lm.backfill_losses = None
+            lm.backfill_points = None
+            lm.last_missing_predictions_round = None
+            members_reset += 1
+        week_winners_deleted = LeagueWeekWinner.query.filter_by(league_id=league_id).delete()
+
+        sync_result = None
+        if data.get('sync_fixtures'):
+            comp_slug = getattr(league, 'competition_slug', None) or 'eng.1'
+            sync_result = _sync_fixtures_for_competition_slug(comp_slug)
+
+        db.session.commit()
+
+        resp = {
+            'message': 'New season started. Standings reset to 0W/0D/0L for all members.',
+            'season_started_at': season_start.isoformat(),
+            'members_reset': members_reset,
+            'week_winners_cleared': week_winners_deleted,
+        }
+        if sync_result is not None:
+            resp['fixture_sync'] = sync_result
+        return make_response(resp, 200)
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error starting new season: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)

@@ -54,6 +54,9 @@ function Members() {
     const [backfillDialogOpen, setBackfillDialogOpen] = useState(false)
     const [backfillJson, setBackfillJson] = useState('')
     const [backfillMessage, setBackfillMessage] = useState(null)
+    const [newSeasonDialogOpen, setNewSeasonDialogOpen] = useState(false)
+    const [newSeasonSyncFixtures, setNewSeasonSyncFixtures] = useState(true)
+    const [startingNewSeason, setStartingNewSeason] = useState(false)
     const [plStandings, setPlStandings] = useState(null)
     const [loadingStandings, setLoadingStandings] = useState(false)
     const [standingsError, setStandingsError] = useState(null)
@@ -499,6 +502,44 @@ function Members() {
             .finally(() => setDisplayNameSaving(false))
     }
 
+    function handleStartNewSeason() {
+        if (!leagueId) return
+        setStartingNewSeason(true)
+        setSyncMessage(null)
+        authenticatedFetch(`/api/v1/leagues/${leagueId}/start-new-season`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sync_fixtures: newSeasonSyncFixtures }),
+        })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data.error || 'Failed to start new season')
+                const sync = data.fixture_sync
+                let text = data.message || 'New season started.'
+                if (sync?.error) {
+                    text += ` Fixture sync failed: ${sync.error}`
+                } else if (sync?.total_written != null) {
+                    text += ` Fixtures synced (added=${sync.added ?? 0}, updated=${sync.updated ?? 0}).`
+                }
+                setSyncMessage({ type: sync?.error ? 'warning' : 'success', text })
+                setNewSeasonDialogOpen(false)
+                fetchLeagueById(authenticatedFetch, leagueId).then((league) => {
+                    if (league) setLeagueDetail(league)
+                })
+                fetchLeaderboard()
+                getAvailableRounds()
+                loadCurrentRoundAndFixtures()
+                getPredictions()
+            })
+            .catch(err => {
+                setSyncMessage({ type: 'error', text: err.message || 'Failed to start new season' })
+            })
+            .finally(() => {
+                setStartingNewSeason(false)
+                setTimeout(() => setSyncMessage(null), 8000)
+            })
+    }
+
     function handleDeleteLeague() {
         if (!leagueId) return
         authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
@@ -780,9 +821,17 @@ function Members() {
                             variant="outlined"
                             color="secondary"
                             onClick={() => setBackfillDialogOpen(true)}
-                            disabled={syncing}
+                            disabled={syncing || startingNewSeason}
                         >
                             Backfill standings
+                        </Button>
+                        <Button
+                            variant="outlined"
+                            color="warning"
+                            onClick={() => setNewSeasonDialogOpen(true)}
+                            disabled={syncing || startingNewSeason}
+                        >
+                            Start new season
                         </Button>
                     </>
                 )}
@@ -1474,6 +1523,33 @@ function Members() {
                 </Box>
             </Grid>
         </Grid>
+
+        {/* Start new season (admin) */}
+        <Dialog open={newSeasonDialogOpen} onClose={() => !startingNewSeason && setNewSeasonDialogOpen(false)} maxWidth="sm" fullWidth>
+            <DialogTitle>Start new season?</DialogTitle>
+            <DialogContent>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Resets the league table to 0W/0D/0L for every member. Prior-season picks stay saved but no longer count toward standings.
+                    Backfilled scores and weekly week-winner history are cleared. Members, invite link, and league settings are unchanged.
+                </Typography>
+                <FormControlLabel
+                    control={(
+                        <Checkbox
+                            checked={newSeasonSyncFixtures}
+                            onChange={(e) => setNewSeasonSyncFixtures(e.target.checked)}
+                            disabled={startingNewSeason}
+                        />
+                    )}
+                    label={"Sync fixtures for this league's competition (pull in schedule when available)"}
+                />
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={() => setNewSeasonDialogOpen(false)} disabled={startingNewSeason}>Cancel</Button>
+                <Button variant="contained" color="warning" onClick={handleStartNewSeason} disabled={startingNewSeason}>
+                    {startingNewSeason ? 'Starting…' : 'Start new season'}
+                </Button>
+            </DialogActions>
+        </Dialog>
 
         {/* Delete league confirmation */}
         <Dialog open={deleteLeagueDialog} onClose={() => setDeleteLeagueDialog(false)}>
