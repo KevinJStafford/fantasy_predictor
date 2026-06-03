@@ -5,6 +5,7 @@ import * as yup from 'yup';
 import { useHistory, useLocation, Link } from 'react-router-dom';
 import { apiUrl, authenticatedFetch } from '../utils/api';
 import { saveToken, getToken, removeToken } from '../utils/auth';
+import { writeCurrentUserSnapshot } from '../utils/currentUserSnapshot';
 
 import Navbar from './Navbar'
 
@@ -27,6 +28,7 @@ function Login({setUser}) {
             .then((resp) => {
                 if (resp.ok) {
                     return resp.json().then((user) => {
+                        writeCurrentUserSnapshot(user);
                         setUser(user);
                         window.dispatchEvent(new Event('user-updated'));
                         history.push(redirectTo);
@@ -60,6 +62,7 @@ function Login({setUser}) {
                         if (token) {
                             saveToken(token)
                         }
+                        writeCurrentUserSnapshot(user)
                         setUser(user)
                         window.dispatchEvent(new Event('user-updated'))
                         history.push(redirectTo)

@@ -10,6 +10,7 @@ import {
     refreshUserLeagues,
     upsertLeagueInSnapshot,
 } from '../utils/leaguesSnapshot'
+import { fetchCurrentUser } from '../utils/currentUserSnapshot'
 
 function Leagues() {
     const [leagues, setLeagues] = useState([])
@@ -56,15 +57,12 @@ function Leagues() {
         }
     }, [location.search, history])
 
-    function fetchCurrentUser() {
-        authenticatedFetch('/api/v1/authorized')
-            .then(res => (res.ok ? res.json() : null))
-            .then(user => setCurrentUser(user))
-            .catch(() => setCurrentUser(null))
+    function loadCurrentUser() {
+        fetchCurrentUser(authenticatedFetch).then(setCurrentUser)
     }
 
     useEffect(() => {
-        fetchCurrentUser()
+        loadCurrentUser()
     }, [])
 
     useEffect(() => {
@@ -86,7 +84,7 @@ function Leagues() {
         refreshUserLeagues(authenticatedFetch)
             .then((leagues) => {
                 setLeagues(leagues)
-                fetchCurrentUser()
+                loadCurrentUser()
             })
             .catch((error) => {
                 console.error('Error fetching leagues:', error)

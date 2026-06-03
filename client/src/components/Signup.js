@@ -6,6 +6,7 @@ import * as yup from 'yup';
 import { useHistory, useLocation } from 'react-router-dom';
 import { apiUrl } from '../utils/api';
 import { saveToken } from '../utils/auth';
+import { writeCurrentUserSnapshot } from '../utils/currentUserSnapshot';
 
 import Navbar from './Navbar'
 
@@ -57,6 +58,7 @@ function Signup({setUser}) {
                         if (token) {
                             saveToken(token)
                         }
+                        writeCurrentUserSnapshot(user)
                         setUser(user)
                         window.dispatchEvent(new Event('user-updated'))
                         history.push(redirectTo)

@@ -8,11 +8,16 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import { useHistory } from 'react-router-dom';
 import { getToken, removeToken } from '../utils/auth';
 import { authenticatedFetch, apiUrl } from '../utils/api';
+import {
+    clearCurrentUserSnapshot,
+    fetchCurrentUser,
+    getCachedCurrentUser,
+} from '../utils/currentUserSnapshot';
 
 function Navbar() {
     const history = useHistory();
     const [anchorEl, setAnchorEl] = React.useState(null);
-    const [user, setUser] = React.useState(null);
+    const [user, setUser] = React.useState(() => getCachedCurrentUser());
     const open = Boolean(anchorEl);
     const logoUrl = (process.env.PUBLIC_URL || '') + '/typeface_logo_new.png';
     const isLoggedIn = !!getToken();
@@ -20,12 +25,10 @@ function Navbar() {
     const fetchUser = React.useCallback(() => {
         if (!getToken()) {
             setUser(null);
+            clearCurrentUserSnapshot();
             return;
         }
-        authenticatedFetch('/api/v1/authorized')
-            .then((r) => (r.ok ? r.json() : null))
-            .then(setUser)
-            .catch(() => setUser(null));
+        fetchCurrentUser(authenticatedFetch).then(setUser);
     }, []);
 
     useEffect(() => {

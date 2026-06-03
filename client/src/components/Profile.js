@@ -23,6 +23,7 @@ import { authenticatedFetch, apiUrl } from '../utils/api'
 import { getToken } from '../utils/auth'
 import { getAuthHeaders } from '../utils/auth'
 import { getCachedLeagues, refreshUserLeagues, writeLeaguesSnapshot } from '../utils/leaguesSnapshot'
+import { writeCurrentUserSnapshot } from '../utils/currentUserSnapshot'
 
 function Profile() {
     const history = useHistory()
@@ -52,6 +53,7 @@ function Profile() {
         authenticatedFetch('/api/v1/authorized')
             .then((r) => (r.ok ? r.json() : null))
             .then((u) => {
+                if (u) writeCurrentUserSnapshot(u)
                 setUser(u)
                 if (u) {
                     setEmail(u.email || '')
@@ -177,6 +179,7 @@ function Profile() {
             .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
             .then(({ ok, data }) => {
                 if (ok && data.user) {
+                    writeCurrentUserSnapshot(data.user)
                     setUser(data.user)
                     setAccountSuccess(data.message || 'Profile updated.')
                     if (data.user.email) setEmail(data.user.email)
@@ -220,6 +223,7 @@ function Profile() {
             .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
             .then(({ ok, data }) => {
                 if (ok && data.user) {
+                    writeCurrentUserSnapshot(data.user)
                     setUser(data.user)
                     setAccountSuccess('Profile picture updated.')
                     window.dispatchEvent(new Event('user-updated'))

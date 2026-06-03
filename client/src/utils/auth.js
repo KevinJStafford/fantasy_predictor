@@ -2,6 +2,7 @@
 // Stores JWT token in localStorage for cross-domain authentication
 
 import { clearLeaguesSnapshot } from './leaguesSnapshot'
+import { clearCurrentUserSnapshot } from './currentUserSnapshot'
 
 const TOKEN_KEY = 'fantasy_predictor_token';
 
@@ -18,6 +19,7 @@ export const getToken = () => {
 export const removeToken = () => {
     localStorage.removeItem(TOKEN_KEY);
     clearLeaguesSnapshot();
+    clearCurrentUserSnapshot();
 };
 
 export const getAuthHeaders = () => {
