@@ -22,6 +22,7 @@ import { useHistory } from 'react-router-dom'
 import { authenticatedFetch, apiUrl } from '../utils/api'
 import { getToken } from '../utils/auth'
 import { getAuthHeaders } from '../utils/auth'
+import { getCachedLeagues, refreshUserLeagues, writeLeaguesSnapshot } from '../utils/leaguesSnapshot'
 
 function Profile() {
     const history = useHistory()
@@ -63,15 +64,19 @@ function Profile() {
 
     useEffect(() => {
         if (!user?.id) return
-        setLeaguesLoading(true)
+        const cached = getCachedLeagues()
+        if (cached.length) {
+            setLeagues(cached)
+            setLeaguesLoading(false)
+        } else {
+            setLeaguesLoading(true)
+        }
         setLeaguesError(null)
-        authenticatedFetch('/api/v1/leagues')
-            .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
-            .then(({ ok, data }) => {
-                if (!ok) throw new Error(data.error || 'Failed to load leagues')
-                setLeagues(data.leagues || [])
+        refreshUserLeagues(authenticatedFetch)
+            .then((leagues) => setLeagues(leagues))
+            .catch((e) => {
+                if (!cached.length) setLeaguesError(e.message || 'Failed to load leagues')
             })
-            .catch((e) => setLeaguesError(e.message || 'Failed to load leagues'))
             .finally(() => setLeaguesLoading(false))
     }, [user?.id])
 
@@ -106,17 +111,20 @@ function Profile() {
             .then(({ ok, data }) => {
                 if (!ok) throw new Error(data.error || 'Failed to update notification setting')
                 if (data.league) {
-                    setLeagues((prev) => (prev || []).map((l) => (Number(l.id) === Number(leagueId) ? data.league : l)))
+                    setLeagues((prev) => {
+                        const next = (prev || []).map((l) =>
+                            Number(l.id) === Number(leagueId) ? data.league : l
+                        )
+                        writeLeaguesSnapshot(next)
+                        return next
+                    })
                 }
             })
             .catch((e) => {
                 setLeaguesError(e.message || 'Failed to update notification setting')
                 // Best-effort refresh
-                authenticatedFetch('/api/v1/leagues')
-                    .then((r) => (r.ok ? r.json() : null))
-                    .then((data) => {
-                        if (data?.leagues) setLeagues(data.leagues)
-                    })
+                refreshUserLeagues(authenticatedFetch)
+                    .then((list) => setLeagues(list))
                     .catch(() => {})
             })
             .finally(() => {

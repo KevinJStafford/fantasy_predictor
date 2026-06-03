@@ -553,7 +553,7 @@ class Users(Resource):
                 display_base = 'Player'
             signup_league_id = app.config.get('SIGNUP_LEAGUE_ID')
             if signup_league_id is not None:
-                league = League.query.get(signup_league_id)
+                league = db.session.get(League, signup_league_id)
                 if league and not LeagueMembership.query.filter_by(league_id=league.id, user_id=user.id).first():
                     display_name = display_base
                     suffix = 0
@@ -2129,7 +2129,7 @@ class PredictionsResource(Resource):
             competition_slug = None
             league_id = request.args.get('league_id', type=int)
             if league_id:
-                league = League.query.get(league_id)
+                league = db.session.get(League, league_id)
                 if league and getattr(league, 'competition_slug', None):
                     competition_slug = league.competition_slug
             
@@ -2228,7 +2228,7 @@ class PredictionsResource(Resource):
                 return make_response({'error': 'Missing required fields: fixture_id, home_team_score, away_team_score'}, 400)
             
             # Get the fixture
-            fixture = Fixture.query.get(fixture_id)
+            fixture = db.session.get(Fixture, fixture_id)
             if not fixture:
                 return make_response({'error': 'Fixture not found'}, 404)
             
@@ -2336,13 +2336,13 @@ def ask_ai_prediction():
         if not league_id:
             return make_response({'error': 'Missing league_id (required to check if Ask AI is enabled for this league)'}, 400)
 
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         if not getattr(league, 'ai_predictions_enabled', False):
             return make_response({'error': 'Ask AI is not enabled for this league'}, 403)
 
-        fixture = Fixture.query.get(fixture_id)
+        fixture = db.session.get(Fixture, fixture_id)
         if not fixture:
             return make_response({'error': 'Fixture not found'}, 404)
 
@@ -3279,6 +3279,33 @@ def get_user_leagues():
         print(traceback.format_exc())
         return make_response({'error': str(e)}, 500)
 
+
+@app.route('/api/v1/leagues/<int:league_id>', methods=['GET'])
+def get_league(league_id):
+    """Get one league the current user belongs to (for bookmarks / league page without full list)."""
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return make_response({'error': 'User not authenticated'}, 401)
+
+        league = db.session.get(League, league_id)
+        if not league:
+            return make_response({'error': 'League not found'}, 404)
+
+        user = get_active_user_by_id(user_id)
+        if not user or user not in league.members:
+            return make_response({'error': 'User is not a member of this league'}, 403)
+
+        d = league.to_dict()
+        d['is_admin'] = is_league_admin(user_id, league_id)
+        return make_response({'league': d}, 200)
+    except Exception as e:
+        print(f"Error fetching league {league_id}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return make_response({'error': str(e)}, 500)
+
+
 @app.route('/api/v1/leagues', methods=['POST'])
 def create_league():
     """Create a new league. Requires display_name (your username for this league)."""
@@ -3341,7 +3368,7 @@ def join_league(league_id):
         if not display_name:
             return make_response({'error': 'Display name for this league is required'}, 400)
         
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
@@ -3352,7 +3379,7 @@ def join_league(league_id):
         
         db.session.add(LeagueMembership(user_id=user_id, league_id=league_id, display_name=display_name, role='player'))
         db.session.commit()
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         return make_response({'league': league.to_dict()}, 200)
     except Exception as e:
         db.session.rollback()
@@ -3389,7 +3416,7 @@ def join_league_by_code():
         
         db.session.add(LeagueMembership(user_id=user_id, league_id=league.id, display_name=display_name, role='player'))
         db.session.commit()
-        league = League.query.get(league.id)
+        league = db.session.get(League, league.id)
         return make_response({'league': league.to_dict()}, 200)
     except Exception as e:
         db.session.rollback()
@@ -3406,7 +3433,7 @@ def update_my_league_display_name(league_id):
         user_id = get_current_user_id()
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         membership = get_league_membership(user_id, league_id)
@@ -3447,7 +3474,7 @@ def update_league_member_role(league_id, member_user_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can update member roles'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         membership = get_league_membership(member_user_id, league_id)
@@ -3482,7 +3509,7 @@ def remove_league_member(league_id, member_user_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can remove members'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         membership = get_league_membership(member_user_id, league_id)
@@ -3508,7 +3535,7 @@ def delete_league(league_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can delete the league'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         LeagueMembership.query.filter_by(league_id=league_id).delete()
@@ -3532,10 +3559,10 @@ def admin_update_prediction(league_id, game_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can update predictions'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
-        game = Game.query.get(game_id)
+        game = db.session.get(Game, game_id)
         if not game:
             return make_response({'error': 'Prediction/game not found'}, 404)
         # Game must belong to a member of this league
@@ -3592,11 +3619,11 @@ def admin_update_fixture_round(league_id, fixture_id):
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can update fixture game week'}, 403)
 
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
 
-        fixture = Fixture.query.get(fixture_id)
+        fixture = db.session.get(Fixture, fixture_id)
         if not fixture:
             return make_response({'error': 'Fixture not found'}, 404)
 
@@ -3664,7 +3691,7 @@ def get_member_predictions_for_admin(league_id, member_user_id):
             return make_response({'error': 'Only league admins can view member predictions'}, 403)
         if not get_league_membership(member_user_id, league_id):
             return make_response({'error': 'User is not a member of this league'}, 404)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         league_comp = getattr(league, 'competition_slug', None) or 'eng.1'
         comp_filter = _fixture_query_competition(league_comp)
         all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all()
@@ -3704,7 +3731,7 @@ def admin_create_member_prediction(league_id, member_user_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can create predictions for members'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         if not get_league_membership(member_user_id, league_id):
@@ -3816,7 +3843,7 @@ def get_league_leaderboard(league_id):
         if not user_id:
             return make_response({'error': 'User not authenticated'}, 401)
         
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
@@ -4140,7 +4167,7 @@ def get_backfill_standings(league_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can view backfill standings'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         standings = []
@@ -4170,7 +4197,7 @@ def backfill_league_standings(league_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only a league admin can backfill standings'}, 403)
-        league = League.query.get(league_id)
+        league = db.session.get(League, league_id)
         if not league:
             return make_response({'error': 'League not found'}, 404)
         data = request.get_json() or {}

@@ -9,6 +9,13 @@ import {
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import { apiUrl, authenticatedFetch } from '../utils/api'
+import {
+    applyLeagueCompetitionToState,
+    competitionSlugForLeagueView,
+    fetchLeagueById,
+    getLeagueFromSnapshot,
+    removeLeagueFromSnapshot,
+} from '../utils/leaguesSnapshot'
 
 
 function Members() {
@@ -62,8 +69,8 @@ function Members() {
         (leagueDetail?.created_by != null && currentUser?.id != null && Number(leagueDetail.created_by) === Number(currentUser.id)) ||
         false
     const leagueMembers = leagueDetail?.members ?? []
-    // When viewing a league, use its competition for API calls so we don't hit eng.1 before state updates
-    const effectiveCompetition = leagueDetail?.competition_slug ?? selectedCompetition
+    // Snapshot + league detail so API calls use the right competition before /leagues returns
+    const effectiveCompetition = competitionSlugForLeagueView(leagueId, leagueDetail, selectedCompetition)
     const isWorldCup = effectiveCompetition === 'fifa.world'
     const weekOrDayLabel = isWorldCup ? 'Day' : 'Game Week'
     const weekOrDayTitle = (num) => isWorldCup ? `Day ${num}` : `Week ${num}`
@@ -87,22 +94,29 @@ function Members() {
             .catch(() => setCurrentUser(null))
     }, [])
 
-    // Fetch leagues (to get league detail with members/roles) and leaderboard when league_id is set
+    // Hydrate league from snapshot, then refresh from API (members/roles + admin sync)
     useEffect(() => {
-        if (!leagueId) return
-        authenticatedFetch('/api/v1/leagues')
-            .then(res => res.ok ? res.json() : { leagues: [] })
-            .then(data => {
-                const league = (data.leagues || []).find(l => l.id === leagueId)
+        if (!leagueId) {
+            setLeagueDetail(null)
+            return
+        }
+        const cached = getLeagueFromSnapshot(leagueId)
+        if (cached) {
+            setLeagueDetail(cached)
+            applyLeagueCompetitionToState(cached, setSelectedCompetition)
+        } else {
+            setLeagueDetail(null)
+        }
+        fetchLeagueById(authenticatedFetch, leagueId)
+            .then((league) => {
                 setLeagueDetail(league || null)
                 if (league?.competition_slug) {
                     setSelectedCompetition(league.competition_slug)
                 } else if (league) {
                     setSelectedCompetition('eng.1')
                 }
-                // Admin: auto-refresh fixture scores when league page loads so results/leaderboard are up to date
                 if (league?.is_admin) {
-                    const comp = league.competition_slug || 'eng.1'
+                    const comp = league.competition_slug || competitionSlugForLeagueView(leagueId, league, selectedCompetition) || 'eng.1'
                     setSyncing(true)
                     authenticatedFetch('/api/v1/fixtures/sync-scores', {
                         method: 'POST',
@@ -124,9 +138,14 @@ function Members() {
                         .finally(() => setSyncing(false))
                 }
             })
-            .catch(() => setLeagueDetail(null))
+            .catch((err) => {
+                if (!cached) setLeagueDetail(null)
+                if (err?.status === 403 || err?.status === 404) {
+                    history.push('/leagues')
+                }
+            })
         fetchLeaderboard()
-    }, [leagueId])
+    }, [leagueId, history])
 
     // Fetch supported competitions (leagues) for predictions
     useEffect(() => {
@@ -431,11 +450,10 @@ function Members() {
 
     function refreshLeagueDetail() {
         if (!leagueId) return
-        authenticatedFetch('/api/v1/leagues')
-            .then(res => res.ok ? res.json() : { leagues: [] })
-            .then(data => {
-                const league = (data.leagues || []).find(l => l.id === leagueId)
+        fetchLeagueById(authenticatedFetch, leagueId)
+            .then((league) => {
                 setLeagueDetail(league || null)
+                applyLeagueCompetitionToState(league, setSelectedCompetition)
             })
             .catch(() => setLeagueDetail(null))
         fetchLeaderboard()
@@ -481,6 +499,7 @@ function Members() {
         authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
             .then(res => {
                 if (res.ok) {
+                    removeLeagueFromSnapshot(leagueId)
                     setDeleteLeagueDialog(false)
                     history.push('/leagues')
                 } else {

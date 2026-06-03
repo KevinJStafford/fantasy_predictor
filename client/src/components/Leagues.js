@@ -5,6 +5,11 @@ import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dia
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useHistory, useLocation, Link as RouterLink } from 'react-router-dom'
 import { authenticatedFetch } from '../utils/api'
+import {
+    getCachedLeagues,
+    refreshUserLeagues,
+    upsertLeagueInSnapshot,
+} from '../utils/leaguesSnapshot'
 
 function Leagues() {
     const [leagues, setLeagues] = useState([])
@@ -70,23 +75,24 @@ function Leagues() {
     }, [])
 
     function fetchLeagues() {
-        setLoading(true)
+        const cached = getCachedLeagues()
+        if (cached.length) {
+            setLeagues(cached)
+            setLoading(false)
+        } else {
+            setLoading(true)
+        }
         setError(null)
-        authenticatedFetch('/api/v1/leagues')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Failed to fetch leagues')
-                }
-                return response.json()
-            })
-            .then(data => {
-                setLeagues(data.leagues || [])
-                // Refetch current user after successful leagues load so "Signed in as" always has email
+        refreshUserLeagues(authenticatedFetch)
+            .then((leagues) => {
+                setLeagues(leagues)
                 fetchCurrentUser()
             })
-            .catch(error => {
+            .catch((error) => {
                 console.error('Error fetching leagues:', error)
-                setError('Failed to load leagues. Please try again.')
+                if (!cached.length) {
+                    setError('Failed to load leagues. Please try again.')
+                }
             })
             .finally(() => {
                 setLoading(false)
@@ -151,6 +157,7 @@ function Leagues() {
         .then(res => res.json())
         .then(data => {
             if (data.league) {
+                upsertLeagueInSnapshot(data.league)
                 setJoinDialogOpen(false)
                 setInviteCode('')
                 setJoinDisplayName('')
@@ -192,6 +199,7 @@ function Leagues() {
             .then(res => res.json())
             .then(data => {
                 if (data.league) {
+                    upsertLeagueInSnapshot(data.league)
                     setCreateDialogOpen(false)
                     setCreateName('')
                     setCreateDisplayName('')
@@ -224,6 +232,7 @@ function Leagues() {
             .then(res => res.json())
             .then(data => {
                 if (data.league) {
+                    upsertLeagueInSnapshot(data.league)
                     setJoinOpenLeagueId(null)
                     setJoinOpenDisplayName('')
                     fetchLeagues()
