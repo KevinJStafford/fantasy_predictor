@@ -5,6 +5,7 @@ import { Container, Typography, Button, Box, Alert, Card, CardContent, Grid, Dia
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useHistory, useLocation, Link as RouterLink } from 'react-router-dom'
 import { authenticatedFetch } from '../utils/api'
+import { removeToken } from '../utils/auth'
 import {
     getCachedLeagues,
     refreshUserLeagues,
@@ -37,8 +38,22 @@ function Leagues() {
     const [joinOpenDisplayName, setJoinOpenDisplayName] = useState('')
     const [joinOpenError, setJoinOpenError] = useState(null)
     const [copySnackbarOpen, setCopySnackbarOpen] = useState(false)
+    const [pageFlash, setPageFlash] = useState(null)
     const history = useHistory()
     const location = useLocation()
+
+    useEffect(() => {
+        const flash = location.state?.flash
+        if (flash?.text) {
+            setPageFlash(flash)
+        }
+        if (location.state?.refreshLeagues) {
+            fetchLeagues()
+        }
+        if (flash?.text || location.state?.refreshLeagues) {
+            history.replace(location.pathname + location.search, {})
+        }
+    }, [location.state, location.pathname, location.search, history])
 
     useEffect(() => {
         fetchLeagues()
@@ -88,8 +103,20 @@ function Leagues() {
             })
             .catch((error) => {
                 console.error('Error fetching leagues:', error)
+                if (error?.auth) {
+                    removeToken()
+                    history.push('/login', {
+                        state: {
+                            flash: {
+                                type: 'error',
+                                text: 'Your session expired. Please log in again.',
+                            },
+                        },
+                    })
+                    return
+                }
                 if (!cached.length) {
-                    setError('Failed to load leagues. Please try again.')
+                    setError(error.message || 'Failed to load leagues. Please try again.')
                 }
             })
             .finally(() => {
@@ -273,6 +300,16 @@ function Leagues() {
                 {error && (
                     <Alert severity="error" sx={{ mb: 2 }}>
                         {error}
+                    </Alert>
+                )}
+
+                {pageFlash && (
+                    <Alert
+                        severity={pageFlash.type === 'error' ? 'error' : 'info'}
+                        sx={{ mb: 2 }}
+                        onClose={() => setPageFlash(null)}
+                    >
+                        {pageFlash.text}
                     </Alert>
                 )}
 

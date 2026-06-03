@@ -28,7 +28,12 @@ function Navbar() {
             clearCurrentUserSnapshot();
             return;
         }
-        fetchCurrentUser(authenticatedFetch).then(setUser);
+        fetchCurrentUser(authenticatedFetch).then((u) => {
+            if (!u && getToken()) {
+                removeToken();
+            }
+            setUser(u);
+        });
     }, []);
 
     useEffect(() => {

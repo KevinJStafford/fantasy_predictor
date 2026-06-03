@@ -20,10 +20,10 @@ import {
 } from '@mui/material'
 import { useHistory } from 'react-router-dom'
 import { authenticatedFetch, apiUrl } from '../utils/api'
-import { getToken } from '../utils/auth'
+import { getToken, removeToken } from '../utils/auth'
 import { getAuthHeaders } from '../utils/auth'
 import { getCachedLeagues, refreshUserLeagues, writeLeaguesSnapshot } from '../utils/leaguesSnapshot'
-import { writeCurrentUserSnapshot } from '../utils/currentUserSnapshot'
+import { fetchCurrentUser } from '../utils/currentUserSnapshot'
 
 function Profile() {
     const history = useHistory()
@@ -50,17 +50,28 @@ function Profile() {
             history.push('/login')
             return
         }
-        authenticatedFetch('/api/v1/authorized')
-            .then((r) => (r.ok ? r.json() : null))
+        fetchCurrentUser(authenticatedFetch)
             .then((u) => {
-                if (u) writeCurrentUserSnapshot(u)
-                setUser(u)
-                if (u) {
-                    setEmail(u.email || '')
-                    setUsername(u.username || '')
+                if (!u) {
+                    removeToken()
+                    history.push('/login', {
+                        state: {
+                            flash: {
+                                type: 'error',
+                                text: 'Your session expired. Please log in again.',
+                            },
+                        },
+                    })
+                    return
                 }
+                setUser(u)
+                setEmail(u.email || '')
+                setUsername(u.username || '')
             })
-            .catch(() => setUser(null))
+            .catch(() => {
+                removeToken()
+                history.push('/login')
+            })
             .finally(() => setLoading(false))
     }, [history])
 
@@ -250,7 +261,14 @@ function Profile() {
     }
 
     if (!user) {
-        return null
+        return (
+            <>
+                <Navbar />
+                <Container maxWidth="sm" sx={{ mt: 4 }}>
+                    <Typography color="text.secondary">Redirecting to login…</Typography>
+                </Container>
+            </>
+        )
     }
 
     return (

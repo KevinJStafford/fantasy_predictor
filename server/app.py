@@ -3030,7 +3030,8 @@ def authorized():
         return make_response({"error": "Not authenticated"}, 401)
     user_dict = get_user_dict_by_id(user_id)
     if not user_dict:
-        return make_response({"error": "User not found"}, 404)
+        # Treat missing/deactivated user like expired auth so clients clear the JWT.
+        return make_response({"error": "Not authenticated"}, 401)
     return make_response(user_dict, 200)
 
 
@@ -3310,7 +3311,7 @@ def get_user_leagues():
         
         user = get_active_user_by_id(user_id)
         if not user:
-            return make_response({'error': 'User not found'}, 404)
+            return make_response({'error': 'User not authenticated'}, 401)
         
         leagues = []
         for league in user.leagues:
@@ -3580,13 +3581,15 @@ def delete_league(league_id):
             return make_response({'error': 'User not authenticated'}, 401)
         if not is_league_admin(user_id, league_id):
             return make_response({'error': 'Only league admins can delete the league'}, 403)
-        league = db.session.get(League, league_id)
-        if not league:
+        if not db.session.get(League, league_id):
             return make_response({'error': 'League not found'}, 404)
+        # Bulk deletes avoid ORM cascade on stale in-memory memberships (faster, no hang).
         LeagueWeekWinner.query.filter_by(league_id=league_id).delete(synchronize_session=False)
         LeagueMembership.query.filter_by(league_id=league_id).delete(synchronize_session=False)
-        db.session.flush()
-        db.session.delete(league)
+        deleted = League.query.filter_by(id=league_id).delete(synchronize_session=False)
+        if not deleted:
+            db.session.rollback()
+            return make_response({'error': 'League not found'}, 404)
         db.session.commit()
         return make_response({'message': 'League deleted'}, 200)
     except Exception as e:

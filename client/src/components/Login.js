@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import {TextField, Button, Container, Box} from '@mui/material';
+import { useEffect, useState } from 'react';
+import {TextField, Button, Container, Box, Alert} from '@mui/material';
 import {useFormik} from 'formik';
 import * as yup from 'yup';
 import { useHistory, useLocation, Link } from 'react-router-dom';
@@ -20,6 +20,16 @@ function Login({setUser}) {
     const history = useHistory();
     const location = useLocation();
     const redirectTo = getNextRedirect(location);
+    const [pageFlash, setPageFlash] = useState(() => location.state?.flash || null);
+    const [submitting, setSubmitting] = useState(false);
+    const [loginError, setLoginError] = useState(null);
+
+    useEffect(() => {
+        if (location.state?.flash) {
+            setPageFlash(location.state.flash);
+            history.replace(location.pathname + location.search, {});
+        }
+    }, [location.state, location.pathname, location.search, history]);
 
     // If user already has a valid token, log them in and redirect
     useEffect(() => {
@@ -50,6 +60,8 @@ function Login({setUser}) {
         },
         validationSchema: loginSchema,
         onSubmit: (values) => {
+            setSubmitting(true)
+            setLoginError(null)
             fetch(apiUrl('/api/v1/login'), {
                 method: 'POST',
                 headers: {
@@ -58,27 +70,33 @@ function Login({setUser}) {
                 body: JSON.stringify({ email: values.email, password: values.password })
             }).then((resp) => {
                 if (resp.ok) {
-                    resp.json().then(({user, token}) => {
-                        if (token) {
-                            saveToken(token)
+                    return resp.json().then((data) => {
+                        const user = data?.user
+                        const token = data?.token
+                        if (!token) {
+                            setLoginError('Login succeeded but no session was returned. Please try again or contact support.')
+                            return
                         }
-                        writeCurrentUserSnapshot(user)
-                        setUser(user)
-                        window.dispatchEvent(new Event('user-updated'))
+                        saveToken(token)
+                        if (user) {
+                            writeCurrentUserSnapshot(user)
+                            setUser(user)
+                            window.dispatchEvent(new Event('user-updated'))
+                        }
                         history.push(redirectTo)
                     })
-                } else {
-                    resp.json().then((data) => {
-                        console.error('Login error:', data.error || 'Login failed')
-                        alert(data.error || 'Login failed. Please check your email and password.')
-                    }).catch(() => {
-                        alert('Login failed. Please try again.')
-                    })
                 }
+                return resp.json().then((data) => {
+                    const msg = data?.error || 'Login failed. Please check your email and password.'
+                    console.error('Login error:', msg)
+                    setLoginError(msg)
+                }).catch(() => {
+                    setLoginError('Login failed. Please try again.')
+                })
             }).catch((error) => {
                 console.error('Login request error:', error)
-                alert('Failed to connect to server. Please try again.')
-            })
+                setLoginError('Failed to connect to server. Please try again.')
+            }).finally(() => setSubmitting(false))
         }
     })
 
@@ -89,6 +107,16 @@ function Login({setUser}) {
             {/* {formik.errors} */}
         <hr></hr>
         <Container maxWidth="xs">
+            {pageFlash?.text && (
+                <Alert severity={pageFlash.type === 'error' ? 'error' : 'info'} sx={{ mb: 2 }}>
+                    {pageFlash.text}
+                </Alert>
+            )}
+            {loginError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                    {loginError}
+                </Alert>
+            )}
             <form onSubmit={formik.handleSubmit}>
                 <Box>
                 <TextField
@@ -123,7 +151,9 @@ function Login({setUser}) {
                     </Link>
                 </Box>
                 <hr></hr>
-                <Button fullWidth variant="contained" color="primary" type="submit">Submit</Button>
+                <Button fullWidth variant="contained" color="primary" type="submit" disabled={submitting}>
+                    {submitting ? 'Signing in…' : 'Submit'}
+                </Button>
             </form>
         </Container>
             </div>

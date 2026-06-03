@@ -100,7 +100,20 @@ export function applyLeagueCompetitionToState(league, setSelectedCompetition) {
  */
 export function refreshUserLeagues(authenticatedFetch) {
     return authenticatedFetch('/api/v1/leagues')
-        .then((res) => (res.ok ? res.json() : { leagues: [] }))
+        .then((res) => {
+            if (res.status === 401 || res.status === 404) {
+                const err = new Error('Session expired')
+                err.status = res.status
+                err.auth = true
+                throw err
+            }
+            if (!res.ok) {
+                return res.json().then((data) => {
+                    throw new Error(data?.error || 'Failed to load leagues')
+                })
+            }
+            return res.json()
+        })
         .then((data) => {
             const leagues = data.leagues || []
             writeLeaguesSnapshot(leagues)
@@ -111,10 +124,10 @@ export function refreshUserLeagues(authenticatedFetch) {
 /**
  * Fetch a single league by id; updates snapshot entry. Throws with .status 403|404 when not allowed.
  */
-export function fetchLeagueById(authenticatedFetch, leagueId) {
+export function fetchLeagueById(authenticatedFetch, leagueId, options = {}) {
     const id = Number(leagueId)
     if (!id) return Promise.resolve(null)
-    return authenticatedFetch(`/api/v1/leagues/${id}`)
+    return authenticatedFetch(`/api/v1/leagues/${id}`, { signal: options.signal })
         .then((res) =>
             res.json().then((data) => ({
                 ok: res.ok,

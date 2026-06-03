@@ -1,7 +1,7 @@
 import * as React from 'react'
 import Navbar from './Navbar'
 import Predictions from './Predictions'
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import { useLocation, useHistory } from 'react-router-dom'
 import {
     Typography, Button, Box, Alert, Card, CardContent, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
@@ -22,6 +22,7 @@ import {
 function Members() {
     const location = useLocation()
     const history = useHistory()
+    const leagueOpsAbortRef = useRef(null)
     const [leagueId, setLeagueId] = useState(null)
     const [leaderboard, setLeaderboard] = useState([])
     const [leaderboardScope, setLeaderboardScope] = useState('full_season')
@@ -110,6 +111,10 @@ function Members() {
             setLeagueDetail(null)
             return
         }
+        leagueOpsAbortRef.current?.abort()
+        const abort = new AbortController()
+        leagueOpsAbortRef.current = abort
+        const { signal } = abort
         const cached = getLeagueFromSnapshot(leagueId)
         if (cached) {
             setLeagueDetail(cached)
@@ -117,8 +122,9 @@ function Members() {
         } else {
             setLeagueDetail(null)
         }
-        fetchLeagueById(authenticatedFetch, leagueId)
+        fetchLeagueById(authenticatedFetch, leagueId, { signal })
             .then((league) => {
+                if (signal.aborted) return
                 setLeagueDetail(league || null)
                 if (league?.competition_slug) {
                     setSelectedCompetition(league.competition_slug)
@@ -131,30 +137,42 @@ function Members() {
                     authenticatedFetch('/api/v1/fixtures/sync-scores', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ competition: comp })
+                        body: JSON.stringify({ competition: comp }),
+                        signal,
                     })
                         .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
                         .then(data => {
+                            if (signal.aborted) return
                             if (data?.error) throw new Error(data.error)
-                            return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+                            return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST', signal })
                         })
                         .then(() => {
+                            if (signal.aborted) return
                             getPredictions()
                             fetchLeaderboard()
                             getAvailableRounds()
                             loadCurrentRoundAndFixtures()
                         })
-                        .catch(() => {})
-                        .finally(() => setSyncing(false))
+                        .catch((err) => {
+                            if (err?.name === 'AbortError') return
+                        })
+                        .finally(() => {
+                            if (!signal.aborted) setSyncing(false)
+                        })
                 }
             })
             .catch((err) => {
+                if (err?.name === 'AbortError') return
                 if (!cached) setLeagueDetail(null)
                 if (err?.status === 403 || err?.status === 404) {
                     history.push('/leagues')
                 }
             })
         fetchLeaderboard()
+        return () => {
+            abort.abort()
+            if (leagueOpsAbortRef.current === abort) leagueOpsAbortRef.current = null
+        }
     }, [leagueId, history])
 
     // Fetch supported competitions (leagues) for predictions
@@ -194,12 +212,17 @@ function Members() {
     // On league page load: run check-results once competition is known. (Admin sync runs in league-fetch effect.)
     useEffect(() => {
         if (!leagueId || !effectiveCompetition) return
-        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
+        const abort = new AbortController()
+        authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST', signal: abort.signal })
             .then(() => {
+                if (abort.signal.aborted) return
                 getPredictions()
                 fetchLeaderboard()
             })
-            .catch(() => {})
+            .catch((err) => {
+                if (err?.name === 'AbortError') return
+            })
+        return () => abort.abort()
     }, [leagueId, effectiveCompetition])
 
     // Refetch admin member predictions when member or round changes (ensures mobile Select always loads correct member's picks)
@@ -544,10 +567,25 @@ function Members() {
 
     async function handleDeleteLeague() {
         if (!leagueId || deletingLeague) return
+        const idToDelete = leagueId
         setDeletingLeague(true)
         setDeleteLeagueError(null)
+        // Cancel long-running sync/check-results so DELETE is not stuck behind them (single-worker dev server).
+        leagueOpsAbortRef.current?.abort()
+        leagueOpsAbortRef.current = null
+        setSyncing(false)
+        setDeleteLeagueDialog(false)
+        setLeagueId(null)
+        setLeagueDetail(null)
+        history.replace('/leagues')
+        const timeoutMs = 90000
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
         try {
-            const res = await authenticatedFetch(`/api/v1/leagues/${leagueId}`, { method: 'DELETE' })
+            const res = await authenticatedFetch(`/api/v1/leagues/${idToDelete}`, {
+                method: 'DELETE',
+                signal: controller.signal,
+            })
             let data = null
             const body = await res.text()
             if (body) {
@@ -560,14 +598,15 @@ function Members() {
             if (!res.ok) {
                 throw new Error(data?.error || `Failed to delete league (${res.status})`)
             }
-            removeLeagueFromSnapshot(leagueId)
-            setDeleteLeagueDialog(false)
-            history.push('/leagues')
+            removeLeagueFromSnapshot(idToDelete)
+            history.replace({ pathname: '/leagues', state: { refreshLeagues: true } })
         } catch (err) {
-            const message = err.message || 'Failed to delete league'
-            setDeleteLeagueError(message)
-            setSyncMessage({ type: 'error', text: message })
+            const message = err.name === 'AbortError'
+                ? 'Delete timed out. Check your leagues list—the league may or may not have been removed.'
+                : (err.message || 'Failed to delete league')
+            history.replace({ pathname: '/leagues', state: { flash: { type: 'error', text: message } } })
         } finally {
+            clearTimeout(timeoutId)
             setDeletingLeague(false)
         }
     }

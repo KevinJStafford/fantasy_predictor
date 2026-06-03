@@ -52,7 +52,8 @@ export function fetchCurrentUser(authenticatedFetch) {
     return authenticatedFetch('/api/v1/authorized')
         .then((res) => {
             if (requestId !== fetchRequestId) return { stale: true }
-            if (res.status === 401) {
+            // 401/404: token present but user missing or deactivated — do not keep stale cache
+            if (res.status === 401 || res.status === 404) {
                 clearCurrentUserSnapshot()
                 return { user: null, unauthorized: true }
             }
