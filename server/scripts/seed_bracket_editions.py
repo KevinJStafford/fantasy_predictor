@@ -8,6 +8,8 @@ SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
 
+from sqlalchemy.exc import IntegrityError
+
 from config import app, db  # noqa: E402
 from models import TournamentEdition, TournamentGroupTeam  # noqa: E402
 
@@ -29,48 +31,61 @@ WC_2026_GROUPS = {
 }
 
 
+def ensure_default_bracket_editions():
+    """Idempotent: ensure FIFA World Cup 2026 is present and active with the official draw."""
+    edition = TournamentEdition.query.filter_by(slug='fifa-world-2026').first()
+    created = False
+    if not edition:
+        edition = TournamentEdition(
+            competition_slug='fifa.world',
+            year=2026,
+            slug='fifa-world-2026',
+            name='FIFA World Cup 2026',
+            num_groups=12,
+            third_place_advance=8,
+            bracket_lock_at=datetime(2026, 6, 11, 19, 0, 0),
+            is_active=True,
+        )
+        db.session.add(edition)
+        db.session.flush()
+        created = True
+        print(f'Created edition: {edition.slug}')
+    elif not edition.is_active:
+        edition.is_active = True
+        print(f'Activated edition: {edition.slug}')
+
+    existing = {
+        (row.group_key, row.team_name)
+        for row in TournamentGroupTeam.query.filter_by(edition_id=edition.id).all()
+    }
+    added = 0
+    for group_key, teams in WC_2026_GROUPS.items():
+        for team_name in teams:
+            key = (group_key, team_name)
+            if key in existing:
+                continue
+            db.session.add(
+                TournamentGroupTeam(
+                    edition_id=edition.id,
+                    group_key=group_key,
+                    team_name=team_name,
+                )
+            )
+            added += 1
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        edition = TournamentEdition.query.filter_by(slug='fifa-world-2026').first()
+    if created or added:
+        print(f'Bracket seed complete. Added {added} group team(s) for {edition.slug}.')
+    return edition
+
+
 def seed():
     with app.app_context():
-        edition = TournamentEdition.query.filter_by(slug='fifa-world-2026').first()
-        if not edition:
-            edition = TournamentEdition(
-                competition_slug='fifa.world',
-                year=2026,
-                slug='fifa-world-2026',
-                name='FIFA World Cup 2026',
-                num_groups=12,
-                third_place_advance=8,
-                bracket_lock_at=datetime(2026, 6, 11, 19, 0, 0),
-                is_active=True,
-            )
-            db.session.add(edition)
-            db.session.flush()
-            print(f'Created edition: {edition.slug}')
-        else:
-            edition.is_active = True
-            print(f'Edition already exists: {edition.slug}')
-
-        existing = {
-            (row.group_key, row.team_name)
-            for row in TournamentGroupTeam.query.filter_by(edition_id=edition.id).all()
-        }
-        added = 0
-        for group_key, teams in WC_2026_GROUPS.items():
-            for team_name in teams:
-                key = (group_key, team_name)
-                if key in existing:
-                    continue
-                db.session.add(
-                    TournamentGroupTeam(
-                        edition_id=edition.id,
-                        group_key=group_key,
-                        team_name=team_name,
-                    )
-                )
-                added += 1
-
-        db.session.commit()
-        print(f'Seed complete. Added {added} group team(s) for {edition.slug}.')
+        ensure_default_bracket_editions()
 
 
 if __name__ == '__main__':

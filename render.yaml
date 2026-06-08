@@ -6,7 +6,7 @@ services:
     plan: free
     pythonVersion: 3.11
     rootDir: server
-    buildCommand: pip install -r requirements.txt && flask db upgrade
+    buildCommand: pip install -r requirements.txt && flask db upgrade && flask seed-bracket-editions
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     envVars:
       - key: FLASK_APP
