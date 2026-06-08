@@ -618,9 +618,9 @@ function KnockoutBracket({ resolved, picks = {}, onPick, disabled, saving, loadi
           maxWidth: { xs: '100vw', md: '100%' },
           ml: { xs: 'calc(50% - 50vw)', md: 0 },
           overflowX: 'auto',
-          overflowY: 'hidden',
+          overflowY: 'visible',
           WebkitOverflowScrolling: 'touch',
-          touchAction: 'pan-x',
+          overscrollBehaviorX: 'contain',
           minWidth: 0,
           pb: 1,
         }}
