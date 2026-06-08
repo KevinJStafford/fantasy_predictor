@@ -3,7 +3,7 @@ from tournament_engine import validate_group_prediction
 
 
 def test_validate_group_ordering():
-    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic']
+    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czechia']
     data, errors = validate_group_prediction(
         'A',
         teams,
@@ -16,7 +16,7 @@ def test_validate_group_ordering():
 
 
 def test_validate_ranking_uses_cascading_tiebreakers():
-    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic']
+    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czechia']
     # Winner beats second on points only; second beats third on GD when points tied
     data, errors = validate_group_prediction(
         'A',
@@ -30,7 +30,7 @@ def test_validate_ranking_uses_cascading_tiebreakers():
 
 
 def test_validate_ranking_error_on_points():
-    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic']
+    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czechia']
     _, errors = validate_group_prediction(
         'A',
         teams,
@@ -42,7 +42,7 @@ def test_validate_ranking_error_on_points():
 
 
 def test_validate_allows_any_goal_difference():
-    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic']
+    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czechia']
     _, errors = validate_group_prediction(
         'A',
         teams,
@@ -54,7 +54,7 @@ def test_validate_allows_any_goal_difference():
 
 
 def test_validate_rejects_unknown_team():
-    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic']
+    teams = ['Mexico', 'South Africa', 'Korea Republic', 'Czechia']
     _, errors = validate_group_prediction(
         'A',
         teams,

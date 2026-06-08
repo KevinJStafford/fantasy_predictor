@@ -21,11 +21,11 @@ def _all_twelve_group_predictions():
         'A': (('Mexico', 7, 3, 8), ('South Africa', 4, 0, 4), ('Korea Republic', 3, -1, 3)),
         'B': (('Canada', 7, 2, 7), ('Switzerland', 4, 1, 5), ('Qatar', 3, -2, 2)),
         'C': (('Brazil', 9, 5, 10), ('Morocco', 4, 0, 4), ('Haiti', 3, -3, 2)),
-        'D': (('United States', 7, 2, 6), ('Paraguay', 4, 0, 3), ('Australia', 3, -1, 2)),
+        'D': (('USA', 7, 2, 6), ('Paraguay', 4, 0, 3), ('Australia', 3, -1, 2)),
         'E': (('Germany', 7, 3, 7), ('Ecuador', 4, 0, 4), ('Curaçao', 3, -2, 1)),
         'F': (('Netherlands', 7, 2, 6), ('Tunisia', 4, 0, 3), ('Japan', 3, -1, 3)),
         'G': (('Belgium', 7, 2, 5), ('New Zealand', 4, 0, 3), ('Egypt', 3, -2, 2)),
-        'H': (('Spain', 9, 4, 9), ('Uruguay', 4, 1, 4), ('Cape Verde', 3, -2, 2)),
+        'H': (('Spain', 9, 4, 9), ('Uruguay', 4, 1, 4), ('Cabo Verde', 3, -2, 2)),
         'I': (('France', 7, 2, 6), ('Norway', 4, 0, 3), ('Senegal', 2, -3, 1)),
         'J': (('Argentina', 7, 2, 5), ('Jordan', 4, 0, 3), ('Algeria', 2, -2, 2)),
         'K': (('Portugal', 7, 3, 6), ('Colombia', 4, 0, 4), ('Uzbekistan', 2, -3, 1)),
@@ -51,7 +51,7 @@ def test_scenario_abcdefgh_row_495_placements():
     matches = {m['match_key']: m for m in result['rounds'][0]['matches']}
     assert matches['r32-M79']['home']['team'] == 'Mexico'
     # FIFA Annex C row 495 (qualifiers A–H): 1A←3H, 1B←3G, 1D←3B, 1E←3C, 1G←3A, 1I←3F, 1K←3D, 1L←3E
-    assert matches['r32-M79']['away']['team'] == 'Cape Verde'
+    assert matches['r32-M79']['away']['team'] == 'Cabo Verde'
     assert matches['r32-M74']['away']['team'] == 'Haiti'
     assert matches['r32-M85']['away']['team'] == 'Egypt'
     assert matches['r32-M81']['away']['team'] == 'Qatar'

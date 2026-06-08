@@ -53,7 +53,7 @@ def _seed_group_a_edition():
     )
     db.session.add(edition)
     db.session.flush()
-    for team in ('Mexico', 'South Africa', 'Korea Republic', 'Czech Republic'):
+    for team in ('Mexico', 'South Africa', 'Korea Republic', 'Czechia'):
         db.session.add(TournamentGroupTeam(edition_id=edition.id, group_key='A', team_name=team))
     user = User(email='groups@smoke.test')
     user.password_hash = 'password'

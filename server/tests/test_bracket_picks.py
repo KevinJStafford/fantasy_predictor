@@ -55,20 +55,9 @@ def _seed_minimal_edition():
     db.session.add(edition)
     db.session.flush()
 
-    groups = {
-        'A': ['Mexico', 'South Africa', 'Korea Republic', 'Czech Republic'],
-        'B': ['Canada', 'Switzerland', 'Qatar', 'Playoff D'],
-        'C': ['Brazil', 'Morocco', 'Haiti', 'Scotland'],
-        'D': ['United States', 'Paraguay', 'Australia', 'Playoff C'],
-        'E': ['Germany', 'Curaçao', 'Ivory Coast', 'Ecuador'],
-        'F': ['Netherlands', 'Japan', 'UEFA Playoff', 'Tunisia'],
-        'G': ['Belgium', 'Egypt', 'Iran', 'New Zealand'],
-        'H': ['Spain', 'Cape Verde', 'Saudi Arabia', 'Uruguay'],
-        'I': ['France', 'Senegal', 'Norway', 'IC Playoff 2'],
-        'J': ['Argentina', 'Algeria', 'Austria', 'Jordan'],
-        'K': ['Portugal', 'DR Congo', 'Uzbekistan', 'Colombia'],
-        'L': ['England', 'Croatia', 'Ghana', 'Panama'],
-    }
+    from tournament_rules.wc_2026_groups import WC_2026_GROUPS
+
+    groups = WC_2026_GROUPS
     for group_key, teams in groups.items():
         for team_name in teams:
             db.session.add(TournamentGroupTeam(

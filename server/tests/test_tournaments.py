@@ -46,7 +46,7 @@ def _seed_edition():
     )
     db.session.add(edition)
     db.session.flush()
-    for team in ('Mexico', 'South Africa', 'Korea Republic', 'Czech Republic'):
+    for team in ('Mexico', 'South Africa', 'Korea Republic', 'Czechia'):
         db.session.add(
             TournamentGroupTeam(edition_id=edition.id, group_key='A', team_name=team)
         )
@@ -91,7 +91,7 @@ def test_get_tournament_edition_with_groups(client):
         assert edition['name'] == 'FIFA World Cup 2026'
         assert edition['num_groups'] == 12
         assert set(edition['groups']['A']) == {
-            'Mexico', 'South Africa', 'Korea Republic', 'Czech Republic',
+            'Mexico', 'South Africa', 'Korea Republic', 'Czechia',
         }
     finally:
         _drop_bracket_tables()
