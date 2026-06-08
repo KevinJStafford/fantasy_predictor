@@ -190,7 +190,7 @@ class TournamentEdition(db.Model, SerializerMixin):
             'year': self.year,
             'num_groups': self.num_groups,
             'third_place_advance': self.third_place_advance,
-            'bracket_lock_at': lock_at.isoformat() if lock_at else None,
+            'bracket_lock_at': f'{lock_at.isoformat()}Z' if lock_at else None,
             'is_active': self.is_active,
             'is_locked': is_locked,
             'submission_count': submission_count,

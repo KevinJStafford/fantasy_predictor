@@ -2,6 +2,16 @@
 
 Source: https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/standings
 """
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# First match kickoff: 11 June 2026, 3:00 PM US Eastern (EDT → UTC).
+WC_2026_FIRST_KICKOFF_ET = datetime(2026, 6, 11, 15, 0, tzinfo=ZoneInfo('America/New_York'))
+
+
+def wc_2026_bracket_lock_at_utc():
+    """Naive UTC datetime for DB storage and lock comparisons."""
+    return WC_2026_FIRST_KICKOFF_ET.astimezone(timezone.utc).replace(tzinfo=None)
 
 WC_2026_GROUPS = {
     'A': ['Mexico', 'South Africa', 'Korea Republic', 'Czechia'],

@@ -2,8 +2,6 @@
 """Seed tournament editions for bracket challenges. Run from server/: python scripts/seed_bracket_editions.py"""
 import os
 import sys
-from datetime import datetime
-
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if SERVER_DIR not in sys.path:
     sys.path.insert(0, SERVER_DIR)
@@ -18,7 +16,11 @@ from models import (  # noqa: E402
     TournamentEdition,
     TournamentGroupTeam,
 )
-from tournament_rules.wc_2026_groups import WC_2026_GROUPS, WC_2026_TEAM_RENAMES  # noqa: E402
+from tournament_rules.wc_2026_groups import (  # noqa: E402
+    WC_2026_GROUPS,
+    WC_2026_TEAM_RENAMES,
+    wc_2026_bracket_lock_at_utc,
+)
 
 
 def _rename_team(value):
@@ -96,8 +98,10 @@ def _migrate_saved_team_names(edition_id):
 
 def ensure_default_bracket_editions():
     """Idempotent: ensure FIFA World Cup 2026 is present and active with the official draw."""
+    lock_at = wc_2026_bracket_lock_at_utc()
     edition = TournamentEdition.query.filter_by(slug='fifa-world-2026').first()
     created = False
+    lock_updated = False
     if not edition:
         edition = TournamentEdition(
             competition_slug='fifa.world',
@@ -106,16 +110,20 @@ def ensure_default_bracket_editions():
             name='FIFA World Cup 2026',
             num_groups=12,
             third_place_advance=8,
-            bracket_lock_at=datetime(2026, 6, 11, 19, 0, 0),
+            bracket_lock_at=lock_at,
             is_active=True,
         )
         db.session.add(edition)
         db.session.flush()
         created = True
         print(f'Created edition: {edition.slug}')
-    elif not edition.is_active:
-        edition.is_active = True
-        print(f'Activated edition: {edition.slug}')
+    else:
+        if not edition.is_active:
+            edition.is_active = True
+            print(f'Activated edition: {edition.slug}')
+        if edition.bracket_lock_at != lock_at:
+            edition.bracket_lock_at = lock_at
+            lock_updated = True
 
     draw_changes = _sync_group_teams(edition.id)
     pick_changes = _migrate_saved_team_names(edition.id)
@@ -129,10 +137,11 @@ def ensure_default_bracket_editions():
             draw_changes += _sync_group_teams(edition.id)
             pick_changes += _migrate_saved_team_names(edition.id)
             db.session.commit()
-    if created or draw_changes or pick_changes:
+    if created or draw_changes or pick_changes or lock_updated:
         print(
             f'Bracket seed complete for {edition.slug}: '
-            f'{draw_changes} draw change(s), {pick_changes} saved pick rename(s).'
+            f'{draw_changes} draw change(s), {pick_changes} saved pick rename(s)'
+            f"{', lock time updated' if lock_updated else ''}."
         )
     return edition
 

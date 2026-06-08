@@ -3,6 +3,7 @@ from datetime import datetime
 
 import app as flask_app
 from models import BracketEntry, BracketPick, GroupPrediction, TournamentEdition, TournamentGroupTeam, User
+from tournament_rules.wc_2026_groups import wc_2026_bracket_lock_at_utc
 
 
 def _auth_headers(user_id):
@@ -48,7 +49,7 @@ def _seed_group_a_edition():
         name='FIFA World Cup 2026',
         num_groups=12,
         third_place_advance=8,
-        bracket_lock_at=datetime(2026, 6, 11, 19, 0, 0),
+        bracket_lock_at=wc_2026_bracket_lock_at_utc(),
         is_active=True,
     )
     db.session.add(edition)
