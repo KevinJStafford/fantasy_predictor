@@ -148,6 +148,147 @@ class LeagueWeekWinner(db.Model, SerializerMixin):
     user = db.relationship('User', backref=db.backref('league_week_wins', lazy='dynamic'))
 
 
+class TournamentEdition(db.Model, SerializerMixin):
+    """A specific tournament instance (e.g. FIFA World Cup 2026) for bracket challenges."""
+    __tablename__ = 'tournament_editions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    competition_slug = db.Column(db.String, nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    slug = db.Column(db.String, unique=True, nullable=False)  # e.g. fifa-world-2026
+    name = db.Column(db.String, nullable=False)
+    num_groups = db.Column(db.Integer, nullable=False)
+    third_place_advance = db.Column(db.Integer, nullable=False)
+    bracket_lock_at = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    group_teams = db.relationship(
+        'TournamentGroupTeam', back_populates='edition', cascade='all, delete-orphan', lazy='dynamic'
+    )
+    bracket_entries = db.relationship(
+        'BracketEntry', back_populates='edition', cascade='all, delete-orphan', lazy='dynamic'
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('competition_slug', 'year', name='uq_tournament_edition_comp_year'),
+    )
+
+    def to_public_dict(self, submission_count=0):
+        from datetime import datetime, timezone
+
+        lock_at = self.bracket_lock_at
+        is_locked = False
+        if lock_at is not None:
+            ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            lock_naive = lock_at.replace(tzinfo=None) if getattr(lock_at, 'tzinfo', None) else lock_at
+            is_locked = ref >= lock_naive
+        return {
+            'slug': self.slug,
+            'name': self.name,
+            'competition_slug': self.competition_slug,
+            'year': self.year,
+            'num_groups': self.num_groups,
+            'third_place_advance': self.third_place_advance,
+            'bracket_lock_at': lock_at.isoformat() if lock_at else None,
+            'is_active': self.is_active,
+            'is_locked': is_locked,
+            'submission_count': submission_count,
+        }
+
+
+class TournamentGroupTeam(db.Model, SerializerMixin):
+    """Official group draw: which teams belong to each group."""
+    __tablename__ = 'tournament_group_teams'
+
+    id = db.Column(db.Integer, primary_key=True)
+    edition_id = db.Column(db.Integer, db.ForeignKey('tournament_editions.id', ondelete='CASCADE'), nullable=False)
+    group_key = db.Column(db.String(2), nullable=False)
+    team_name = db.Column(db.String, nullable=False)
+    fifa_ranking = db.Column(db.Integer, nullable=True)
+
+    edition = db.relationship('TournamentEdition', back_populates='group_teams')
+
+    __table_args__ = (
+        db.UniqueConstraint('edition_id', 'group_key', 'team_name', name='uq_tournament_group_team'),
+    )
+
+
+class BracketEntry(db.Model, SerializerMixin):
+    """One user's bracket submission for a tournament edition (solo play; leagues filter these)."""
+    __tablename__ = 'bracket_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    edition_id = db.Column(db.Integer, db.ForeignKey('tournament_editions.id', ondelete='CASCADE'), nullable=False)
+    status = db.Column(db.String, nullable=False, default='draft')  # draft | submitted | locked
+    champion_pick = db.Column(db.String, nullable=True)
+    group_points = db.Column(db.Integer, nullable=False, default=0)
+    bracket_points = db.Column(db.Integer, nullable=False, default=0)
+    total_points = db.Column(db.Integer, nullable=False, default=0)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    user = db.relationship('User', backref=db.backref('bracket_entries', lazy='dynamic'))
+    edition = db.relationship('TournamentEdition', back_populates='bracket_entries')
+    group_predictions = db.relationship(
+        'GroupPrediction', back_populates='entry', cascade='all, delete-orphan', lazy='dynamic'
+    )
+    bracket_picks = db.relationship(
+        'BracketPick', back_populates='entry', cascade='all, delete-orphan', lazy='dynamic'
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'edition_id', name='uq_bracket_entry_user_edition'),
+    )
+
+
+class GroupPrediction(db.Model, SerializerMixin):
+    """Predicted top 3 in a group with points, GD, and goals scored."""
+    __tablename__ = 'group_predictions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    bracket_entry_id = db.Column(db.Integer, db.ForeignKey('bracket_entries.id', ondelete='CASCADE'), nullable=False)
+    group_key = db.Column(db.String(2), nullable=False)
+    winner_team = db.Column(db.String, nullable=True)
+    winner_points = db.Column(db.Integer, nullable=True)
+    winner_goal_diff = db.Column(db.Integer, nullable=True)
+    winner_goals_scored = db.Column(db.Integer, nullable=True)
+    runner_up_1_team = db.Column(db.String, nullable=True)
+    runner_up_1_points = db.Column(db.Integer, nullable=True)
+    runner_up_1_goal_diff = db.Column(db.Integer, nullable=True)
+    runner_up_1_goals_scored = db.Column(db.Integer, nullable=True)
+    runner_up_2_team = db.Column(db.String, nullable=True)
+    runner_up_2_points = db.Column(db.Integer, nullable=True)
+    runner_up_2_goal_diff = db.Column(db.Integer, nullable=True)
+    runner_up_2_goals_scored = db.Column(db.Integer, nullable=True)
+
+    entry = db.relationship('BracketEntry', back_populates='group_predictions')
+
+    __table_args__ = (
+        db.UniqueConstraint('bracket_entry_id', 'group_key', name='uq_group_prediction_entry_group'),
+    )
+
+
+class BracketPick(db.Model, SerializerMixin):
+    """Knockout-round winner pick for a bracket entry."""
+    __tablename__ = 'bracket_picks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    bracket_entry_id = db.Column(db.Integer, db.ForeignKey('bracket_entries.id', ondelete='CASCADE'), nullable=False)
+    match_key = db.Column(db.String, nullable=False)  # e.g. r32-M73
+    picked_team = db.Column(db.String, nullable=False)
+    is_correct = db.Column(db.Boolean, nullable=True)
+    points_earned = db.Column(db.Integer, nullable=True)
+
+    entry = db.relationship('BracketEntry', back_populates='bracket_picks')
+
+    __table_args__ = (
+        db.UniqueConstraint('bracket_entry_id', 'match_key', name='uq_bracket_pick_entry_match'),
+    )
+
+
 class League(db.Model, SerializerMixin):
     __tablename__ = 'leagues'
 
@@ -160,6 +301,10 @@ class League(db.Model, SerializerMixin):
     leaderboard_scope = db.Column(db.String, nullable=False, default='full_season')  # 'full_season' | 'weekly'
     # Real-world competition (e.g. eng.1, esp.1, fifa.world) this league predicts; null = legacy EPL
     competition_slug = db.Column(db.String, nullable=True)
+    # score_prediction (default) | knockout_bracket
+    format = db.Column(db.String, nullable=False, default='score_prediction')
+    # For knockout_bracket leagues: which tournament edition members compare brackets on
+    edition_id = db.Column(db.Integer, db.ForeignKey('tournament_editions.id', ondelete='SET NULL'), nullable=True)
     # Enable "Ask AI" score suggestions for this league (can be pay-gated later)
     ai_predictions_enabled = db.Column(db.Boolean, nullable=False, default=False)
     # When set, leaderboard only counts fixtures/games on or after this time (new season in same league).
@@ -167,6 +312,8 @@ class League(db.Model, SerializerMixin):
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+    edition = db.relationship('TournamentEdition', backref=db.backref('leagues', lazy='dynamic'))
 
     # Relationships: members via LeagueMembership (each has display_name per league)
     league_memberships = db.relationship(
@@ -186,6 +333,8 @@ class League(db.Model, SerializerMixin):
             'is_open': getattr(self, 'is_open', False),
             'leaderboard_scope': getattr(self, 'leaderboard_scope', 'full_season'),
             'competition_slug': getattr(self, 'competition_slug', None),
+            'format': getattr(self, 'format', 'score_prediction'),
+            'edition_id': getattr(self, 'edition_id', None),
             'ai_predictions_enabled': getattr(self, 'ai_predictions_enabled', False),
             'season_started_at': self.season_started_at.isoformat() if getattr(self, 'season_started_at', None) else None,
             'created_by': self.created_by,

@@ -21,7 +21,10 @@ from flask_restful import Resource
 # Local imports
 from config import app, db, api, bcrypt
 # Add your model imports
-from models import User, Game, Prediction, Fixture, League, LeagueMembership, LeagueWeekWinner
+from models import (
+    User, Game, Prediction, Fixture, League, LeagueMembership, LeagueWeekWinner,
+    TournamentEdition, TournamentGroupTeam, BracketEntry, GroupPrediction, BracketPick,
+)
 from sqlalchemy import func, or_, select
 
 
@@ -4384,6 +4387,13 @@ def _dedupe_fixtures():
 
 
 # CLI: dedupe fixtures by (competition_slug, round, normalized home/away); keeps one row per match
+@app.cli.command('seed-bracket-editions')
+def seed_bracket_editions_cmd():
+    """Seed active tournament editions for bracket play. Run: flask seed-bracket-editions."""
+    from scripts.seed_bracket_editions import seed
+    seed()
+
+
 @app.cli.command('dedupe-fixtures')
 def dedupe_fixtures_cmd():
     """Remove duplicate fixtures (same competition, round, normalized home/away). Keeps one per match. Run from server dir: flask dedupe-fixtures."""
@@ -4393,6 +4403,10 @@ def dedupe_fixtures_cmd():
             print(f"Dedupe complete: removed {deleted} duplicate fixture(s).")
         else:
             print("No duplicate fixtures found.")
+
+
+from bracket_routes import register_bracket_routes
+register_bracket_routes(app, get_current_user_id=get_current_user_id)
 
 
 # SPA fallback: serve React app's index.html for non-API GET requests (fixes refresh 404)

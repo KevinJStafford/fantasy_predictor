@@ -62,6 +62,11 @@ function Navbar() {
         history.push('/');
     };
 
+    const handleBrackets = () => {
+        setAnchorEl(null);
+        history.push('/brackets');
+    };
+
     const handleMyLeagues = () => {
         setAnchorEl(null);
         history.push('/leagues');
@@ -155,6 +160,9 @@ function Navbar() {
                         <MenuItem onClick={handleProfile}>
                             <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
                             <ListItemText>Profile</ListItemText>
+                        </MenuItem>
+                        <MenuItem onClick={handleBrackets}>
+                            <ListItemText>Brackets</ListItemText>
                         </MenuItem>
                         <MenuItem onClick={handleMyLeagues}>
                             <ListItemText>My leagues</ListItemText>
