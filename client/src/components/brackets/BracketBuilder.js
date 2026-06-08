@@ -319,7 +319,17 @@ function BracketBuilder() {
   return (
     <>
       <Navbar />
-      <Container maxWidth={tab === 1 ? 'xl' : 'md'} sx={{ py: 4 }}>
+      <Container
+        maxWidth={tab === 1 ? 'xl' : 'md'}
+        sx={{
+          py: 4,
+          ...(tab === 1 && {
+            overflow: 'visible',
+            maxWidth: '100% !important',
+            px: { xs: 1, sm: 2, md: 3 },
+          }),
+        }}
+      >
         <Button size="small" onClick={() => history.push('/brackets')} sx={{ mb: 2 }}>
           ← All brackets
         </Button>

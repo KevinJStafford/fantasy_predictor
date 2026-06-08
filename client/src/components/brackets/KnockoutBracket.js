@@ -28,6 +28,8 @@ const CHAMPION_UNDERLINE_HEIGHT = 4;
 const CHAMPION_BANNER_WIDTH = 200;
 const COLUMN_GAP = 24;
 const CENTER_GAP = 200;
+const HALF_WIDTH = 4 * MATCH_WIDTH + 3 * COLUMN_GAP;
+const BRACKET_INNER_WIDTH = HALF_WIDTH + CENTER_GAP + HALF_WIDTH;
 const SF_SYMMETRIC_GAP = 68;
 const FINAL_NUDGE_DOWN = 24;
 
@@ -610,12 +612,24 @@ function KnockoutBracket({ resolved, picks = {}, onPick, disabled, saving, loadi
         </Typography>
       </Box>
 
-      <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+      <Box
+        sx={{
+          width: '100%',
+          maxWidth: '100%',
+          overflowX: 'auto',
+          overflowY: 'visible',
+          WebkitOverflowScrolling: 'touch',
+          pb: 1,
+        }}
+      >
         <Box
           sx={{
             position: 'relative',
             pt: `${topPadding}px`,
             minHeight: columnHeight + topPadding,
+            width: BRACKET_INNER_WIDTH,
+            minWidth: BRACKET_INNER_WIDTH,
+            mx: { xs: 0, md: 'auto' },
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
