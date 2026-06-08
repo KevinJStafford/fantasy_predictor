@@ -11,6 +11,8 @@ import JoinLeagueLanding from "./JoinLeagueLanding";
 import Members from "./Members";
 import Leagues from "./Leagues";
 import Profile from "./Profile";
+import BracketHub from "./brackets/BracketHub";
+import BracketBuilder from "./brackets/BracketBuilder";
 
 function App() {
   // eslint-disable-next-line no-unused-vars
@@ -55,6 +57,12 @@ function App() {
         </Route>
         <Route exact path="/player">
           <Members />
+        </Route>
+        <Route exact path="/brackets">
+          <BracketHub />
+        </Route>
+        <Route exact path="/brackets/:editionSlug">
+          <BracketBuilder />
         </Route>
         <Route exact path="/results">
           <Navbar />
