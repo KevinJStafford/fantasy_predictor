@@ -35,15 +35,17 @@ def _sync_group_teams(edition_id):
         rows = TournamentGroupTeam.query.filter_by(
             edition_id=edition_id, group_key=group_key
         ).all()
-        existing_names = {row.team_name for row in rows}
+        kept_names = set()
 
         for row in rows:
-            if row.team_name not in desired:
-                db.session.delete(row)
-                changed += 1
+            if row.team_name in desired:
+                kept_names.add(row.team_name)
+                continue
+            db.session.delete(row)
+            changed += 1
 
         for team_name in teams:
-            if team_name in existing_names:
+            if team_name in kept_names:
                 continue
             db.session.add(
                 TournamentGroupTeam(
@@ -123,6 +125,10 @@ def ensure_default_bracket_editions():
     except IntegrityError:
         db.session.rollback()
         edition = TournamentEdition.query.filter_by(slug='fifa-world-2026').first()
+        if edition:
+            draw_changes += _sync_group_teams(edition.id)
+            pick_changes += _migrate_saved_team_names(edition.id)
+            db.session.commit()
     if created or draw_changes or pick_changes:
         print(
             f'Bracket seed complete for {edition.slug}: '

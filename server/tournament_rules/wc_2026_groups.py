@@ -18,12 +18,18 @@ WC_2026_GROUPS = {
     'L': ['England', 'Croatia', 'Ghana', 'Panama'],
 }
 
-# Older seed / placeholder names -> current FIFA names
+# Older seed / ESPN placeholder names -> current FIFA names
 WC_2026_TEAM_RENAMES = {
     'Playoff D': 'Bosnia and Herzegovina',
+    'Playoff Path D': 'Bosnia and Herzegovina',
     'Playoff C': 'Türkiye',
+    'Playoff Path C': 'Türkiye',
+    'Turkey': 'Türkiye',
     'UEFA Playoff': 'Sweden',
+    'UEFA Playoff Path': 'Sweden',
+    'UEFA Play-Off Path': 'Sweden',
     'IC Playoff 2': 'Iraq',
+    'Intercontinental Playoff 2': 'Iraq',
     'Czech Republic': 'Czechia',
     'United States': 'USA',
     'Ivory Coast': "Côte d'Ivoire",

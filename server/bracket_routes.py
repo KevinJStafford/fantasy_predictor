@@ -131,13 +131,10 @@ def _incomplete_draw_groups(entry, edition):
 
 
 def _bootstrap_bracket_editions_if_needed(app):
-    """Ensure default editions exist in production when tables are empty."""
+    """Ensure default editions exist and the WC 2026 draw stays in sync (no placeholders)."""
     if app.config.get('TESTING'):
         return
     try:
-        has_active = TournamentEdition.query.filter_by(is_active=True).count() > 0
-        if has_active:
-            return
         from scripts.seed_bracket_editions import ensure_default_bracket_editions
         ensure_default_bracket_editions()
     except Exception as e:
@@ -170,6 +167,7 @@ def register_bracket_routes(app, get_current_user_id=None):
     def get_tournament_edition(edition_slug):
         """Tournament edition metadata and official group draw."""
         try:
+            _bootstrap_bracket_editions_if_needed(app)
             edition = _edition_by_slug(edition_slug)
             if not edition:
                 return make_response({'error': 'Tournament not found'}, 404)
