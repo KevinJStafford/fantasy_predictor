@@ -130,6 +130,20 @@ def _incomplete_draw_groups(entry, edition):
     ]
 
 
+def _bootstrap_bracket_editions_if_needed(app):
+    """Ensure default editions exist in production when tables are empty."""
+    if app.config.get('TESTING'):
+        return
+    try:
+        has_active = TournamentEdition.query.filter_by(is_active=True).count() > 0
+        if has_active:
+            return
+        from scripts.seed_bracket_editions import ensure_default_bracket_editions
+        ensure_default_bracket_editions()
+    except Exception as e:
+        print(f'Bracket edition bootstrap skipped: {e}')
+
+
 def register_bracket_routes(app, get_current_user_id=None):
     """Register tournament/bracket endpoints on the Flask app."""
 
@@ -137,6 +151,7 @@ def register_bracket_routes(app, get_current_user_id=None):
     def get_active_tournaments():
         """List tournament editions open for bracket play."""
         try:
+            _bootstrap_bracket_editions_if_needed(app)
             editions = (
                 TournamentEdition.query.filter_by(is_active=True)
                 .order_by(TournamentEdition.year.desc(), TournamentEdition.name)

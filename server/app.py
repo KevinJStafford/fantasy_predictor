@@ -4409,6 +4409,20 @@ from bracket_routes import register_bracket_routes
 register_bracket_routes(app, get_current_user_id=get_current_user_id)
 
 
+def _bootstrap_bracket_editions_on_startup():
+    if app.config.get('TESTING'):
+        return
+    try:
+        with app.app_context():
+            from bracket_routes import _bootstrap_bracket_editions_if_needed
+            _bootstrap_bracket_editions_if_needed(app)
+    except Exception as e:
+        print(f'Bracket edition startup bootstrap skipped: {e}')
+
+
+_bootstrap_bracket_editions_on_startup()
+
+
 # SPA fallback: serve React app's index.html for non-API GET requests (fixes refresh 404)
 _CLIENT_BUILD = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'client', 'build')
 
