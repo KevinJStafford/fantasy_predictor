@@ -321,12 +321,15 @@ function BracketBuilder() {
       <Navbar />
       <Container
         maxWidth={tab === 1 ? 'xl' : 'md'}
+        disableGutters={tab === 1}
         sx={{
           py: 4,
           ...(tab === 1 && {
-            overflow: 'visible',
+            width: '100%',
             maxWidth: '100% !important',
-            px: { xs: 1, sm: 2, md: 3 },
+            minWidth: 0,
+            overflow: 'visible',
+            px: { xs: 2, sm: 3, md: 4 },
           }),
         }}
       >

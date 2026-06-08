@@ -597,7 +597,7 @@ function KnockoutBracket({ resolved, picks = {}, onPick, disabled, saving, loadi
   } = finalLayoutMetrics(hasChampion);
 
   return (
-    <Box>
+    <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
       <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
         <Typography variant="body2" color="text.secondary">
           Click a team to advance them. Winners flow into the next round automatically.
@@ -614,22 +614,27 @@ function KnockoutBracket({ resolved, picks = {}, onPick, disabled, saving, loadi
 
       <Box
         sx={{
-          width: '100%',
-          maxWidth: '100%',
+          width: { xs: '100vw', md: '100%' },
+          maxWidth: { xs: '100vw', md: '100%' },
+          ml: { xs: 'calc(50% - 50vw)', md: 0 },
           overflowX: 'auto',
-          overflowY: 'visible',
+          overflowY: 'hidden',
           WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-x',
+          minWidth: 0,
           pb: 1,
         }}
       >
         <Box
+          component="span"
           sx={{
+            display: 'inline-block',
+            verticalAlign: 'top',
             position: 'relative',
             pt: `${topPadding}px`,
             minHeight: columnHeight + topPadding,
             width: BRACKET_INNER_WIDTH,
             minWidth: BRACKET_INNER_WIDTH,
-            mx: { xs: 0, md: 'auto' },
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
