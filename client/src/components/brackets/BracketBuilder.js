@@ -33,6 +33,13 @@ function formatLockDate(iso) {
   });
 }
 
+function formatBracketStatus(entry) {
+  if (!entry) return 'Not started';
+  if (entry.status === 'locked') return 'Locked';
+  if (entry.status === 'submitted' || entry.is_complete) return 'Submitted';
+  return 'Draft';
+}
+
 function BracketBuilder() {
   const { editionSlug } = useParams();
   const history = useHistory();
@@ -360,7 +367,7 @@ function BracketBuilder() {
               )}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {entry?.status === 'draft' ? 'Draft' : entry?.status || 'Not started'}
+              {formatBracketStatus(entry)}
             </Typography>
           </Box>
           <LinearProgress variant="determinate" value={progress} sx={{ height: 8, borderRadius: 1 }} />

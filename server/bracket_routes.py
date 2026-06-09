@@ -25,13 +25,60 @@ def _edition_is_locked(edition):
     return datetime.now(timezone.utc).replace(tzinfo=None) >= lock_at
 
 
-def _submission_count(edition_id):
-    return (
-        BracketEntry.query.filter(
-            BracketEntry.edition_id == edition_id,
-            BracketEntry.status.in_(('submitted', 'locked')),
-        ).count()
+def _bracket_completion_metrics(entry, edition):
+    draw_groups = _draw_group_keys(edition.id)
+    groups_required = len(draw_groups) or edition.num_groups
+    predictions = list(entry.group_predictions.all())
+    groups_complete = sum(1 for g in draw_groups if any(
+        gp.group_key == g and group_prediction_is_complete(gp) for gp in predictions
+    ))
+    knockout_required = count_knockout_matches(edition.slug)
+    knockout_complete = entry.bracket_picks.count()
+    return groups_complete, groups_required, knockout_complete, knockout_required
+
+
+def _bracket_entry_is_complete(entry, edition):
+    groups_complete, groups_required, knockout_complete, knockout_required = (
+        _bracket_completion_metrics(entry, edition)
     )
+    if not knockout_required:
+        return False
+    return (
+        groups_complete >= groups_required
+        and knockout_complete >= knockout_required
+    )
+
+
+def _sync_entry_submission_status(entry, edition):
+    """Mark complete brackets as submitted; revert to draft if picks are cleared."""
+    if entry.status == 'locked':
+        return False
+
+    complete = _bracket_entry_is_complete(entry, edition)
+    changed = False
+
+    if complete and entry.status == 'draft':
+        entry.status = 'submitted'
+        if not entry.submitted_at:
+            entry.submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        changed = True
+    elif not complete and entry.status == 'submitted':
+        entry.status = 'draft'
+        entry.submitted_at = None
+        changed = True
+
+    return changed
+
+
+def _submission_count(edition_id):
+    edition = TournamentEdition.query.get(edition_id)
+    if not edition:
+        return 0
+    total = 0
+    for entry in BracketEntry.query.filter_by(edition_id=edition_id).all():
+        if entry.status in ('submitted', 'locked') or _bracket_entry_is_complete(entry, edition):
+            total += 1
+    return total
 
 
 def _edition_by_slug(edition_slug):
@@ -82,7 +129,7 @@ def _group_prediction_to_dict(gp):
 def _entry_is_editable(entry, edition):
     if _edition_is_locked(edition):
         return False
-    if entry and entry.status in ('submitted', 'locked'):
+    if entry and entry.status == 'locked':
         return False
     return True
 
@@ -98,13 +145,14 @@ def _get_or_create_entry(user_id, edition):
 
 
 def _entry_summary(entry, edition):
-    draw_groups = _draw_group_keys(edition.id)
-    groups_required = len(draw_groups) or edition.num_groups
-    predictions = list(entry.group_predictions.all())
-    groups_complete = sum(1 for g in draw_groups if any(
-        gp.group_key == g and group_prediction_is_complete(gp) for gp in predictions
-    ))
-    knockout_required = count_knockout_matches(edition.slug)
+    groups_complete, groups_required, knockout_complete, knockout_required = (
+        _bracket_completion_metrics(entry, edition)
+    )
+    is_complete = (
+        bool(knockout_required)
+        and groups_complete >= groups_required
+        and knockout_complete >= knockout_required
+    )
     return {
         'id': entry.id,
         'status': entry.status,
@@ -115,9 +163,10 @@ def _entry_summary(entry, edition):
         'submitted_at': entry.submitted_at.isoformat() if entry.submitted_at else None,
         'groups_complete': groups_complete,
         'groups_required': groups_required,
-        'knockout_complete': entry.bracket_picks.count(),
+        'knockout_complete': knockout_complete,
         'knockout_required': knockout_required,
         'incomplete_groups': _incomplete_draw_groups(entry, edition),
+        'is_complete': is_complete,
     }
 
 
@@ -204,9 +253,14 @@ def register_bracket_routes(app, get_current_user_id=None):
                         'group_predictions': [],
                         'bracket_picks': [],
                         'is_locked': is_locked,
-                        'edition': edition.to_public_dict(),
+                        'edition': edition.to_public_dict(
+                            submission_count=_submission_count(edition.id),
+                        ),
                         'groups_required': len(draw_groups) or edition.num_groups,
                     }, 200)
+
+                if _sync_entry_submission_status(entry, edition):
+                    db.session.commit()
 
                 summary = _entry_summary(entry, edition)
                 return make_response({
@@ -220,8 +274,10 @@ def register_bracket_routes(app, get_current_user_id=None):
                         {'match_key': p.match_key, 'picked_team': p.picked_team}
                         for p in entry.bracket_picks.order_by(BracketPick.match_key)
                     ],
-                    'is_locked': is_locked or entry.status in ('submitted', 'locked'),
-                    'edition': edition.to_public_dict(),
+                    'is_locked': is_locked or entry.status == 'locked',
+                    'edition': edition.to_public_dict(
+                        submission_count=_submission_count(edition.id),
+                    ),
                 }, 200)
             except Exception as e:
                 print(f"Error fetching bracket entry for {edition_slug}: {e}")
@@ -289,6 +345,7 @@ def register_bracket_routes(app, get_current_user_id=None):
                         db.session.add(gp)
                     apply_group_prediction_row(gp, data)
 
+                _sync_entry_submission_status(entry, edition)
                 db.session.commit()
 
                 summary = _entry_summary(entry, edition)
@@ -400,6 +457,7 @@ def register_bracket_routes(app, get_current_user_id=None):
                 db.session.flush()
                 all_picks = {p.match_key: p.picked_team for p in entry.bracket_picks.all()}
                 entry.champion_pick = all_picks.get('final-M104')
+                _sync_entry_submission_status(entry, edition)
                 db.session.commit()
 
                 try:
