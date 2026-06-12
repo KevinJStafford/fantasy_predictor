@@ -18,6 +18,14 @@ import {
     removeLeagueFromSnapshot,
 } from '../utils/leaguesSnapshot'
 
+/** True once kickoff has passed (or fixture marked completed). ESPN may publish 0-0 before kickoff. */
+function fixtureHasStarted(fixture) {
+    if (!fixture) return false
+    if (fixture.is_completed) return true
+    const kickoff = fixture.fixture_date || fixture.date
+    if (!kickoff) return false
+    return Date.now() >= new Date(kickoff).getTime()
+}
 
 function Members() {
     const location = useLocation()
@@ -1031,7 +1039,8 @@ function Members() {
                                     // Build from completed fixtures in this round; dedupe by match (same normalized home/away) so duplicate DB rows don't show twice
                                     const allCompletedForRound = (filteredFixtures || []).filter(
                                         f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
-                                        f.actual_home_score != null && f.actual_away_score != null
+                                        f.actual_home_score != null && f.actual_away_score != null &&
+                                        fixtureHasStarted(f)
                                     )
                                     const seenMatch = new Set()
                                     const completedFixturesForRound = allCompletedForRound.filter(f => {
@@ -1066,8 +1075,9 @@ function Members() {
                                         )
                                     }
                                     const getDisplayResult = (p) => {
-                                        if (p.game_result) return p.game_result
                                         const f = p.fixture
+                                        if (!fixtureHasStarted(f)) return null
+                                        if (p.game_result) return p.game_result
                                         if (f?.actual_home_score == null || f?.actual_away_score == null || p.home_team_score == null || p.away_team_score == null) return null
                                         const predSame = Number(p.home_team_score) === Number(f.actual_home_score) && Number(p.away_team_score) === Number(f.actual_away_score)
                                         if (predSame) return 'Win'
@@ -1486,7 +1496,8 @@ function Members() {
                                 )
                                 const allCompletedForRoundMobile = (filteredFixtures || []).filter(
                                     f => f.fixture_round != null && Number(f.fixture_round) === selectedRound &&
-                                    f.actual_home_score != null && f.actual_away_score != null
+                                    f.actual_home_score != null && f.actual_away_score != null &&
+                                    fixtureHasStarted(f)
                                 )
                                 const seenMatchMobile = new Set()
                                 const completedFixturesForRound = allCompletedForRoundMobile.filter(f => {
@@ -1523,8 +1534,9 @@ function Members() {
                                 }
 
                                 const getDisplayResult = (p) => {
-                                    if (p.game_result) return p.game_result
                                     const f = p.fixture
+                                    if (!fixtureHasStarted(f)) return null
+                                    if (p.game_result) return p.game_result
                                     if (f?.actual_home_score == null || f?.actual_away_score == null || p.home_team_score == null || p.away_team_score == null) return null
                                     const predSame = Number(p.home_team_score) === Number(f.actual_home_score) && Number(p.away_team_score) === Number(f.actual_away_score)
                                     if (predSame) return 'Win'

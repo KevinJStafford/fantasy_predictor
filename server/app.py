@@ -690,6 +690,46 @@ def _fixture_not_completed_filter():
     return or_(Fixture.is_completed == False, Fixture.is_completed.is_(None))
 
 
+def _fixture_has_started(fixture, now=None):
+    """True once kickoff has passed (or fixture is marked completed). ESPN may publish 0-0 before kickoff."""
+    if fixture is None:
+        return False
+    if getattr(fixture, 'is_completed', False):
+        return True
+    kickoff = getattr(fixture, 'fixture_date', None)
+    if kickoff is None:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if getattr(kickoff, 'tzinfo', None) is None:
+        kickoff = kickoff.replace(tzinfo=timezone.utc)
+    return now >= kickoff
+
+
+def _compute_game_result(game, fixture, now=None):
+    """Return Win/Draw/Loss, or None if the fixture is not scoreable yet (e.g. pre-kickoff ESPN 0-0)."""
+    if not fixture or fixture.actual_home_score is None or fixture.actual_away_score is None:
+        return None
+    if game is None or game.home_team_score is None or game.away_team_score is None:
+        return None
+    if not _fixture_has_started(fixture, now=now):
+        return None
+    pred_home, pred_away = game.home_team_score, game.away_team_score
+    actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
+    if pred_home == actual_home and pred_away == actual_away:
+        return 'Win'
+    pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
+    actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
+    return 'Draw' if pred_winner == actual_winner else 'Loss'
+
+
+def _fixture_scoreable(fixture, now=None):
+    """True when a fixture should count toward W/D/L (has scores and kickoff has passed)."""
+    if fixture is None or fixture.actual_home_score is None or fixture.actual_away_score is None:
+        return False
+    return _fixture_has_started(fixture, now=now)
+
+
 def _lowest_incomplete_fixture_round(comp_filter, season_start=None):
     """Smallest fixture_round with at least one non-completed fixture; None if all complete."""
     from sqlalchemy import distinct
@@ -2178,24 +2218,16 @@ class PredictionsResource(Resource):
                         'actual_home_score': fixture.actual_home_score,
                         'actual_away_score': fixture.actual_away_score
                     }
-                    # When fixture has both scores, ensure game_result is set (for Results table and display)
-                    if (fixture.actual_home_score is not None and fixture.actual_away_score is not None and
-                            game.home_team_score is not None and game.away_team_score is not None):
-                        if not game.game_result:
-                            pred_home = game.home_team_score
-                            pred_away = game.away_team_score
-                            actual_home = fixture.actual_home_score
-                            actual_away = fixture.actual_away_score
-                            if pred_home == actual_home and pred_away == actual_away:
-                                game.game_result = 'Win'
-                            else:
-                                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
-                                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
-                                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+                    # When fixture is scoreable, ensure game_result is set (for Results table and display)
+                    computed = _compute_game_result(game, fixture)
+                    if computed:
+                        if game.game_result != computed:
+                            game.game_result = computed
                             db.session.add(game)
-                            prediction_data['game_result'] = game.game_result
-                        else:
-                            prediction_data['game_result'] = game.game_result
+                        prediction_data['game_result'] = computed
+                    elif game.game_result:
+                        game.game_result = None
+                        db.session.add(game)
                 else:
                     prediction_data['fixture'] = None
                     # Debug: print first few unmatched
@@ -2282,21 +2314,10 @@ class PredictionsResource(Resource):
             
             db.session.commit()
             
-            # After saving, check if fixture is completed and update result
-            if fixture.is_completed and fixture.actual_home_score is not None and fixture.actual_away_score is not None:
-                # Determine result immediately
-                pred_home = game.home_team_score
-                pred_away = game.away_team_score
-                actual_home = fixture.actual_home_score
-                actual_away = fixture.actual_away_score
-                
-                if pred_home == actual_home and pred_away == actual_away:
-                    game.game_result = 'Win'
-                else:
-                    pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
-                    actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
-                    game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
-                
+            # After saving, update result if fixture is scoreable (kickoff passed)
+            result = _compute_game_result(game, fixture)
+            if result:
+                game.game_result = result
                 db.session.commit()
             
             # Create or update prediction record linking user to game
@@ -2908,57 +2929,24 @@ def check_prediction_results():
                 game.home_team = fixture.fixture_home_team
                 game.away_team = fixture.fixture_away_team
             
-            # Treat as completed if we have both scores (even when is_completed is False), so results and leaderboard update
-            if fixture.actual_home_score is None or fixture.actual_away_score is None:
-                fixtures_no_scores += 1
-                if fixtures_no_scores <= 3:
-                    print(f"DEBUG check-results: Fixture has no scores: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, is_completed={fixture.is_completed}, scores={fixture.actual_home_score}-{fixture.actual_away_score}")
+            result = _compute_game_result(game, fixture)
+            if result is None:
+                if fixture.actual_home_score is None or fixture.actual_away_score is None:
+                    fixtures_no_scores += 1
+                elif not _fixture_has_started(fixture):
+                    fixtures_not_completed += 1
+                if game.game_result is not None:
+                    game.game_result = None
+                    results_updated += 1
                 continue
-            if not fixture.is_completed:
-                fixtures_not_completed += 1
-                if fixtures_not_completed <= 3:
-                    print(f"DEBUG check-results: Fixture not marked completed but has scores: {fixture.fixture_home_team} vs {fixture.fixture_away_team}, processing anyway")
-            
-            # Get predicted and actual scores
-            pred_home = game.home_team_score
-            pred_away = game.away_team_score
-            actual_home = fixture.actual_home_score
-            actual_away = fixture.actual_away_score
-            
-            # Determine result
-            result = None
-            
-            # Win: both scores match exactly
-            if pred_home == actual_home and pred_away == actual_away:
-                result = 'Win'
+
+            if result == 'Win':
                 wins += 1
+            elif result == 'Draw':
+                draws += 1
             else:
-                # Determine predicted winner
-                if pred_home > pred_away:
-                    pred_winner = 'home'
-                elif pred_away > pred_home:
-                    pred_winner = 'away'
-                else:
-                    pred_winner = 'draw'
-                
-                # Determine actual winner
-                if actual_home > actual_away:
-                    actual_winner = 'home'
-                elif actual_away > actual_home:
-                    actual_winner = 'away'
-                else:
-                    actual_winner = 'draw'
-                
-                # Draw: predicted winner matches actual winner (but scores differ)
-                if pred_winner == actual_winner:
-                    result = 'Draw'
-                    draws += 1
-                else:
-                    # Loss: wrong winner or wrong scores
-                    result = 'Loss'
-                    losses += 1
-            
-            # Update game result if it changed
+                losses += 1
+
             if game.game_result != result:
                 game.game_result = result
                 results_updated += 1
@@ -3603,15 +3591,9 @@ def admin_update_prediction(league_id, game_id):
                 if (f.fixture_home_team or '').lower().strip() == (game.home_team or '').lower().strip() and (f.fixture_away_team or '').lower().strip() == (game.away_team or '').lower().strip():
                     fixture = f
                     break
-        if fixture and fixture.is_completed and fixture.actual_home_score is not None and fixture.actual_away_score is not None:
-            pred_home, pred_away = game.home_team_score, game.away_team_score
-            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
-            if pred_home == actual_home and pred_away == actual_away:
-                game.game_result = 'Win'
-            else:
-                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
-                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
-                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+        if fixture:
+            result = _compute_game_result(game, fixture)
+            game.game_result = result
         db.session.commit()
         return make_response({'message': 'Prediction updated', 'game': game.to_dict()}, 200)
     except Exception as e:
@@ -3790,15 +3772,9 @@ def admin_create_member_prediction(league_id, member_user_id):
             game_week_name=f"Week {fixture.fixture_round}" if fixture.fixture_round else "Unknown Week",
             game_week=fixture.fixture_date
         )
-        if fixture.actual_home_score is not None and fixture.actual_away_score is not None:
-            pred_home, pred_away = game.home_team_score, game.away_team_score
-            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
-            if pred_home == actual_home and pred_away == actual_away:
-                game.game_result = 'Win'
-            else:
-                pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
-                actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
-                game.game_result = 'Draw' if pred_winner == actual_winner else 'Loss'
+        result = _compute_game_result(game, fixture)
+        if result:
+            game.game_result = result
         db.session.add(game)
         db.session.flush()
         pred = Prediction.query.filter_by(user_id=member_user_id, game_id=game.id).first()
@@ -3882,22 +3858,10 @@ def get_league_leaderboard(league_id):
         if not user or user not in league.members:
             return make_response({'error': 'User is not a member of this league'}, 403)
         
-        # Helper: compute Win/Draw/Loss from predicted vs actual scores (same logic as check-results).
-        # Treat fixture as completed if it has both scores (even when is_completed is False), so leaderboard updates.
         def _result_for_game(game, fixture):
-            if not fixture or fixture.actual_home_score is None or fixture.actual_away_score is None:
-                return None
-            if game.home_team_score is None or game.away_team_score is None:
-                return None
-            pred_home, pred_away = game.home_team_score, game.away_team_score
-            actual_home, actual_away = fixture.actual_home_score, fixture.actual_away_score
-            if pred_home == actual_home and pred_away == actual_away:
-                return 'Win'
-            pred_winner = 'home' if pred_home > pred_away else ('away' if pred_away > pred_home else 'draw')
-            actual_winner = 'home' if actual_home > actual_away else ('away' if actual_away > actual_home else 'draw')
-            return 'Draw' if pred_winner == actual_winner else 'Loss'
+            return _compute_game_result(game, fixture)
 
-        # Completed fixtures = have both scores (missed pick counts as Loss).
+        # Scoreable fixtures = have both scores and kickoff has passed (missed pick counts as Loss).
         # Only consider fixtures for this league's competition and on or after league creation.
         league_competition_slug = getattr(league, 'competition_slug', None) or 'eng.1'
 
@@ -3919,7 +3883,10 @@ def get_league_leaderboard(league_id):
         if comp_filter is not None:
             completed_fixtures = completed_fixtures.filter(comp_filter)
         completed_fixtures = completed_fixtures.all()
-        completed_fixtures = [f for f in completed_fixtures if _fixture_date_on_or_after_league(f, None, league_created_at)]
+        completed_fixtures = [
+            f for f in completed_fixtures
+            if _fixture_date_on_or_after_league(f, None, league_created_at) and _fixture_scoreable(f)
+        ]
 
         # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
         member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
@@ -3956,12 +3923,11 @@ def get_league_leaderboard(league_id):
             for f in q_rounds.all():
                 if _fixture_date_on_or_after_league(f, None, league_created_at):
                     all_fixtures_by_round.setdefault(f.fixture_round, []).append(f)
-            # Round is complete if every fixture has both scores, or is marked is_completed (e.g. rescheduled match)
+            # Round is complete when every fixture is scoreable or marked is_completed (e.g. rescheduled match)
             completed_rounds = []
             for r, flist in all_fixtures_by_round.items():
                 if all(
-                    (f.actual_home_score is not None and f.actual_away_score is not None)
-                    or getattr(f, 'is_completed', False)
+                    getattr(f, 'is_completed', False) or _fixture_scoreable(f)
                     for f in flist
                 ):
                     completed_rounds.append(r)
@@ -3991,13 +3957,6 @@ def get_league_leaderboard(league_id):
                             draws += 1
                         elif res == 'Loss':
                             losses += 1
-                        elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
-                            if g.game_result == 'Win':
-                                wins += 1
-                            elif g.game_result == 'Draw':
-                                draws += 1
-                            else:
-                                losses += 1
                     rounds_with_pick = set()
                     for g in games:
                         fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
@@ -4068,13 +4027,6 @@ def get_league_leaderboard(league_id):
                             draws += 1
                         elif res == 'Loss':
                             losses += 1
-                        elif getattr(g, 'game_result', None) in ('Win', 'Draw', 'Loss'):
-                            if g.game_result == 'Win':
-                                wins += 1
-                            elif g.game_result == 'Draw':
-                                draws += 1
-                            else:
-                                losses += 1
                     rounds_with_pick = set()
                     for g in games:
                         fx = _fixture_for_game(g, league_competition_slug, fixtures_list=all_fixtures)
@@ -4126,13 +4078,6 @@ def get_league_leaderboard(league_id):
                         draws += 1
                     elif res == 'Loss':
                         losses += 1
-                    elif getattr(game, 'game_result', None) in ('Win', 'Draw', 'Loss'):
-                        if game.game_result == 'Win':
-                            wins += 1
-                        elif game.game_result == 'Draw':
-                            draws += 1
-                        else:
-                            losses += 1
                 else:
                     if f.fixture_round is not None and f.fixture_round in rounds_with_pick:
                         losses += 1
