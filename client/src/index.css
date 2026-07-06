@@ -3,8 +3,11 @@
   --brand-primary: #ff6c26;
   --brand-primary-hover: #e55a1a;
   --brand-accent: #f93d3a;
+  --brand-green: #1a472a;
+  --brand-mint: #d8f0f0;
   --brand-header-bg: #ffffff;
   --brand-bg: #fafafa;
+  --landing-font: "DM Sans", "Roboto", "Helvetica", "Arial", sans-serif;
 }
 
 body {
@@ -18,4 +21,23 @@ body {
 
 .nav_logo {
   justify-self: left;
+}
+
+@keyframes landing-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.landing-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: landing-marquee 35s linear infinite;
+}
+
+.landing-marquee-track:hover {
+  animation-play-state: paused;
 }

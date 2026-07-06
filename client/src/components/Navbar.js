@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect } from 'react';
 import Avatar from '@mui/material/Avatar';
-import { Box, AppBar, Toolbar, IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
+import { Box, AppBar, Toolbar, IconButton, Menu, MenuItem, ListItemIcon, ListItemText, Button } from '@mui/material';
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
 import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -83,14 +83,26 @@ function Navbar() {
     };
 
     return (
-        <AppBar position="static" sx={{ backgroundColor: 'background.paper', boxShadow: 1, overflow: 'hidden' }}>
+        <AppBar
+            position="sticky"
+            elevation={0}
+            sx={{
+                backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                backdropFilter: 'blur(12px)',
+                borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                overflow: 'hidden',
+            }}
+        >
             <Toolbar
                 sx={{
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    px: { xs: 1, sm: 2 },
-                    minHeight: { xs: 48, sm: 56 },
-                    height: { xs: 48, sm: 56 },
+                    px: { xs: 1.5, sm: 3 },
+                    minHeight: { xs: 56, sm: 64 },
+                    height: { xs: 56, sm: 64 },
+                    maxWidth: 1280,
+                    width: '100%',
+                    mx: 'auto',
                 }}
             >
                 <Box
@@ -116,7 +128,43 @@ function Navbar() {
                         }}
                     />
                 </Box>
-                <Box sx={{ flexShrink: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1.5 }, flexShrink: 0 }}>
+                    {!isLoggedIn && (
+                        <>
+                            <Button
+                                onClick={() => history.push('/login')}
+                                sx={{
+                                    display: { xs: 'none', sm: 'inline-flex' },
+                                    color: 'text.primary',
+                                    fontWeight: 600,
+                                    fontFamily: 'var(--landing-font)',
+                                    textTransform: 'none',
+                                    borderRadius: 99,
+                                    px: 2,
+                                }}
+                            >
+                                Log in
+                            </Button>
+                            <Button
+                                variant="contained"
+                                onClick={() => history.push('/users')}
+                                sx={{
+                                    display: { xs: 'none', sm: 'inline-flex' },
+                                    bgcolor: '#ff6c26',
+                                    color: '#111',
+                                    fontWeight: 700,
+                                    fontFamily: 'var(--landing-font)',
+                                    textTransform: 'none',
+                                    borderRadius: 99,
+                                    px: 2.5,
+                                    boxShadow: 'none',
+                                    '&:hover': { bgcolor: '#e55a1a', boxShadow: 'none' },
+                                }}
+                            >
+                                Sign up
+                            </Button>
+                        </>
+                    )}
                     <IconButton
                         onClick={handleAvatarClick}
                         aria-label={isLoggedIn ? 'Account menu' : 'Go to login'}

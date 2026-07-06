@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Fantasy Predictor">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a472a"/>
+      <stop offset="100%" stop-color="#143d24"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- Geometric F for better tiny-size legibility -->
+  <rect x="108" y="104" width="74" height="304" rx="22" fill="#ff6c26"/>
+  <rect x="108" y="104" width="208" height="70" rx="22" fill="#ff6c26"/>
+  <rect x="108" y="224" width="170" height="64" rx="20" fill="#ff6c26"/>
+
+  <!-- Geometric p with knockout counter -->
+  <rect x="286" y="152" width="76" height="256" rx="24" fill="#f93d3a"/>
+  <rect x="286" y="132" width="136" height="152" rx="68" fill="#f93d3a"/>
+  <circle cx="352" cy="208" r="38" fill="#1a472a"/>
+</svg>
