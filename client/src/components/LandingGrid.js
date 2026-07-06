@@ -33,7 +33,7 @@ const MARQUEE_ITEMS = [
     'Score Predictions',
     'Private Leagues',
     'Live Leaderboards',
-    'Premier League Fixtures',
+    'Upcoming Fixtures',
     'Compete with Friends',
     'Real-Time Scoring',
     'Bragging Rights',
@@ -68,7 +68,7 @@ const FEATURE_CARDS = [
     {
         icon: SportsSoccerIcon,
         title: 'Predict every match',
-        body: 'Fill in scorelines for upcoming Premier League fixtures each gameweek.',
+        body: 'Fill in scorelines for upcoming fixtures each gameweek.',
     },
     {
         icon: GroupsIcon,
@@ -320,7 +320,6 @@ function LandingGrid() {
                 <Container maxWidth="lg" sx={{ position: 'relative', py: { xs: 6, md: 10 } }}>
                     <Grid container spacing={{ xs: 5, md: 6 }} alignItems="center">
                         <Grid item xs={12} md={6}>
-                            <SectionLabel>Premier League fantasy</SectionLabel>
                             <Typography
                                 component="h1"
                                 sx={{
