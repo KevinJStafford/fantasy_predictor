@@ -182,14 +182,11 @@ function Navbar() {
                                 boxSizing: 'border-box',
                                 ...(user?.avatar_url
                                     ? { bgcolor: 'transparent' }
-                                    : isLoggedIn
-                                    ? {
-                                          bgcolor: '#ffffff',
-                                          border: '2px solid #ff6c26',
-                                          color: '#ff6c26',
-                                          '& .MuiSvgIcon-root': { color: '#ff6c26' },
-                                      }
-                                    : { bgcolor: 'primary.main', color: '#fff', '& .MuiSvgIcon-root': { color: '#fff' } }),
+                                    : {
+                                          bgcolor: 'primary.main',
+                                          color: '#fff',
+                                          '& .MuiSvgIcon-root': { color: '#fff' },
+                                      }),
                             }}
                             variant="rounded"
                         >
