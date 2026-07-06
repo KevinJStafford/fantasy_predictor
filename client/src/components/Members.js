@@ -8,6 +8,7 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, Select, MenuItem, FormControl, InputLabel, FormControlLabel, Checkbox
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings'
 import { apiUrl, authenticatedFetch } from '../utils/api'
 import {
     applyLeagueCompetitionToState,
@@ -17,6 +18,7 @@ import {
     getLeagueFromSnapshot,
     removeLeagueFromSnapshot,
 } from '../utils/leaguesSnapshot'
+import AdminPanel from './AdminPanel'
 
 /** True once kickoff has passed (or fixture marked completed). ESPN may publish 0-0 before kickoff. */
 function fixtureHasStarted(fixture) {
@@ -79,6 +81,7 @@ function Members() {
     const [displayNameDraft, setDisplayNameDraft] = useState('')
     const [displayNameError, setDisplayNameError] = useState(null)
     const [displayNameSaving, setDisplayNameSaving] = useState(false)
+    const [adminPanelOpen, setAdminPanelOpen] = useState(false)
 
     // Prefer backend is_admin flag; fallback to member role or league creator
     const isAdmin = leagueDetail?.is_admin === true ||
@@ -113,7 +116,7 @@ function Members() {
             .catch(() => setCurrentUser(null))
     }, [])
 
-    // Hydrate league from snapshot, then refresh from API (members/roles + admin sync)
+    // Hydrate league from snapshot, then refresh from API (members/roles + silent score refresh for admins)
     useEffect(() => {
         if (!leagueId) {
             setLeagueDetail(null)
@@ -141,11 +144,11 @@ function Members() {
                 }
                 if (league?.is_admin) {
                     const comp = league.competition_slug || competitionSlugForLeagueView(leagueId, league, selectedCompetition) || 'eng.1'
-                    setSyncing(true)
-                    authenticatedFetch('/api/v1/fixtures/sync-scores', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ competition: comp }),
+                    authenticatedFetch('/api/v1/fixtures/sync-scores?' + new URLSearchParams({
+                        competition: comp,
+                        scores_only: 'true',
+                    }).toString(), {
+                        method: 'GET',
                         signal,
                     })
                         .then(res => res.ok ? res.json() : res.json().then(err => { throw new Error(err.error || 'Sync failed') }))
@@ -163,9 +166,6 @@ function Members() {
                         })
                         .catch((err) => {
                             if (err?.name === 'AbortError') return
-                        })
-                        .finally(() => {
-                            if (!signal.aborted) setSyncing(false)
                         })
                 }
             })
@@ -310,12 +310,17 @@ function Members() {
             .finally(() => setLoadingFixtures(false))
     }
 
-    function refreshScores() {
+    function refreshScores({ silent = false } = {}) {
         if (!leagueId && !effectiveCompetition) return
-        const params = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
+        const params = new URLSearchParams({
+            competition: effectiveCompetition || 'eng.1',
+            scores_only: 'true',
+        })
         const pathWithQuery = '/api/v1/fixtures/sync-scores?' + params.toString()
-        setSyncing(true)
-        setSyncMessage(null)
+        if (!silent) {
+            setSyncing(true)
+            setSyncMessage(null)
+        }
         authenticatedFetch(pathWithQuery, { method: 'GET' })
             .then(res => {
                 if (res.status === 404) {
@@ -327,12 +332,14 @@ function Members() {
             })
             .then(data => {
                 if (data && data.error) throw new Error(data.error)
-                const updated = data.fixtures_updated ?? data.updated ?? 0
-                const notFound = data.fixtures_not_found ?? 0
-                setSyncMessage({
-                    type: 'success',
-                    text: `Scores refreshed: ${updated} fixture(s) updated.${notFound ? ` ${notFound} API match(es) had no matching fixture.` : ''}`
-                })
+                if (!silent) {
+                    const updated = data.fixtures_updated ?? data.updated ?? 0
+                    const notFound = data.fixtures_not_found ?? 0
+                    setSyncMessage({
+                        type: 'success',
+                        text: `Scores refreshed: ${updated} fixture(s) updated.${notFound ? ` ${notFound} API match(es) had no matching fixture.` : ''}`
+                    })
+                }
                 return authenticatedFetch('/api/v1/predictions/check-results', { method: 'POST' })
             })
             .then(() => {
@@ -342,14 +349,17 @@ function Members() {
                 if (leagueId) loadCurrentRoundAndFixtures()
             })
             .catch(err => {
+                if (silent) return
                 const msg = err.status === 404
                     ? 'Refresh scores is not available on this server. Deploy the latest backend (with /api/v1/fixtures/sync-scores) to enable it.'
                     : (err.message || 'Failed to refresh scores.')
                 setSyncMessage({ type: 'error', text: msg })
             })
             .finally(() => {
-                setSyncing(false)
-                setTimeout(() => setSyncMessage(null), 6000)
+                if (!silent) {
+                    setSyncing(false)
+                    setTimeout(() => setSyncMessage(null), 6000)
+                }
             })
     }
 
@@ -411,7 +421,10 @@ function Members() {
             let text = `Sync complete. ${details}`
             // After syncing fixture list, pull in latest scores for this league (all use competition=slug)
             try {
-                const scoreParams = new URLSearchParams({ competition: effectiveCompetition || 'eng.1' })
+                const scoreParams = new URLSearchParams({
+                    competition: effectiveCompetition || 'eng.1',
+                    scores_only: 'true',
+                })
                 const scoreRes = await authenticatedFetch('/api/v1/fixtures/sync-scores?' + scoreParams.toString(), { method: 'GET' })
                 const scoreData = await (scoreRes.ok ? scoreRes.json() : scoreRes.json().then(() => ({})))
                 const scoreUpdated = scoreData.fixtures_updated ?? scoreData.updated ?? 0
@@ -851,53 +864,13 @@ function Members() {
                 {isAdmin && (
                     <Button
                         variant="outlined"
-                        color="error"
+                        color="primary"
                         size="small"
-                        onClick={() => {
-                            setDeleteLeagueError(null)
-                            setDeleteLeagueDialog(true)
-                        }}
+                        startIcon={<AdminPanelSettingsIcon />}
+                        onClick={() => setAdminPanelOpen(true)}
                     >
-                        Delete league
+                        Admin
                     </Button>
-                )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {isAdmin && (
-                    <>
-                        <Button 
-                            variant="contained" 
-                            color="primary"
-                            onClick={syncFixtures} 
-                            disabled={syncing}
-                        >
-                            {syncing ? 'Syncing...' : 'Sync Fixtures'}
-                        </Button>
-                        <Button
-                            variant="outlined"
-                            color="primary"
-                            onClick={refreshScores}
-                            disabled={syncing}
-                        >
-                            Refresh scores
-                        </Button>
-                        <Button
-                            variant="outlined"
-                            color="secondary"
-                            onClick={() => setBackfillDialogOpen(true)}
-                            disabled={syncing || startingNewSeason}
-                        >
-                            Backfill standings
-                        </Button>
-                        <Button
-                            variant="outlined"
-                            color="warning"
-                            onClick={() => setNewSeasonDialogOpen(true)}
-                            disabled={syncing || startingNewSeason}
-                        >
-                            Start new season
-                        </Button>
-                    </>
                 )}
             </Box>
         </Box>
@@ -1337,146 +1310,6 @@ function Members() {
                         </Box>
                     )}
 
-                    {/* Admin: Edit member prediction + add missed pick */}
-                    {isAdmin && leagueMembers.length > 0 && (
-                        <Box sx={{ mb: 3 }}>
-                            <Typography variant="h6" component="h3" sx={{ mb: 1 }}>Admin: Edit member prediction</Typography>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-                                <FormControl size="small" sx={{ minWidth: 200 }}>
-                                    <InputLabel>Select member</InputLabel>
-                                    <Select
-                                        value={adminSelectedMemberId}
-                                        label="Select member"
-                                        onChange={(e) => {
-                                            const id = e.target.value
-                                            setAdminSelectedMemberId(id)
-                                            // Predictions refetched by useEffect when adminSelectedMemberId changes
-                                        }}
-                                    >
-                                        <MenuItem value="">—</MenuItem>
-                                        {leagueMembers.map((m) => (
-                                            <MenuItem key={m.id} value={String(m.id)}>{m.display_name}</MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                                <FormControl size="small" sx={{ minWidth: 140 }}>
-                                    <InputLabel>Game week</InputLabel>
-                                    <Select
-                                        value={adminPredictionRound || ''}
-                                        label="Game week"
-                                        onChange={(e) => {
-                                            const r = e.target.value
-                                            setAdminPredictionRound(r)
-                                            // Fixtures refetched by useEffect when adminPredictionRound changes
-                                            if (!r) setAdminFixturesForRound([])
-                                        }}
-                                    >
-                                        <MenuItem value="">—</MenuItem>
-                                        {availableRounds.map((r) => (
-                                            <MenuItem key={r} value={String(r)}>{weekOrDayTitle(r)}</MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                            </Box>
-                            {loadingMemberPredictions ? (
-                                <Typography variant="body2">Loading predictions...</Typography>
-                            ) : adminSelectedMemberId && adminPredictionRound && adminFixturesForRound.length > 0 ? (
-                                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 320, overflow: 'auto' }}>
-                                    <Table size="small" stickyHeader>
-                                        <TableHead>
-                                            <TableRow>
-                                                <TableCell>Match</TableCell>
-                                                <TableCell align="center">Pred</TableCell>
-                                                <TableCell align="center">Actual</TableCell>
-                                                <TableCell align="right">Action</TableCell>
-                                            </TableRow>
-                                        </TableHead>
-                                        <TableBody>
-                                            {adminFixturesForRound.map((fix) => {
-                                                const home = fix.fixture_home_team || fix.home_team || ''
-                                                const away = fix.fixture_away_team || fix.away_team || ''
-                                                const norm = (s) => (String(s || '').toLowerCase().trim()
-                                                    .replace(/&/g, ' and ')
-                                                    .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
-                                                    .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
-                                                    .replace(/\s+/g, ' ')
-                                                )
-                                                const pred = adminMemberPredictions.find(p => p?.fixture?.id && fix?.id && Number(p.fixture.id) === Number(fix.id))
-                                                    || adminMemberPredictions.find(p => p?.home_team != null && p?.away_team != null && norm(p.home_team) === norm(home) && norm(p.away_team) === norm(away))
-                                                const actualFromPred = pred?.fixture && pred.fixture.actual_home_score != null && pred.fixture.actual_away_score != null
-                                                    ? `${pred.fixture.actual_home_score}–${pred.fixture.actual_away_score}`
-                                                    : (fix.actual_home_score != null && fix.actual_away_score != null ? `${fix.actual_home_score}–${fix.actual_away_score}` : '–')
-                                                return (
-                                                    <TableRow key={fix.id || `${home}-${away}`}>
-                                                        <TableCell>{home} vs {away}</TableCell>
-                                                        <TableCell align="center">
-                                                            {pred ? `${pred.home_team_score ?? '–'}–${pred.away_team_score ?? '–'}` : <Typography variant="body2" color="text.secondary">No pick (Loss)</Typography>}
-                                                        </TableCell>
-                                                        <TableCell align="center" sx={{ color: 'text.secondary', fontSize: '0.875rem' }}>
-                                                            {actualFromPred}
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
-                                                                <Button
-                                                                    size="small"
-                                                                    variant="text"
-                                                                    onClick={() => setRoundOverrideDialog({
-                                                                        fixtureId: fix.id,
-                                                                        home_team: home,
-                                                                        away_team: away,
-                                                                        current_round: fix.fixture_round,
-                                                                        new_round: String(fix.fixture_round ?? ''),
-                                                                        manual_round_override: true,
-                                                                    })}
-                                                                >
-                                                                    Set {isWorldCup ? 'day' : 'week'}
-                                                                </Button>
-                                                                {pred ? (
-                                                                    <IconButton
-                                                                        size="small"
-                                                                        aria-label="Edit prediction"
-                                                                        onClick={() => setEditPredictionDialog({
-                                                                            gameId: pred.id,
-                                                                            home_team: pred.home_team,
-                                                                            away_team: pred.away_team,
-                                                                            home_team_score: pred.home_team_score ?? 0,
-                                                                            away_team_score: pred.away_team_score ?? 0
-                                                                        })}
-                                                                    >
-                                                                        <EditIcon fontSize="small" />
-                                                                    </IconButton>
-                                                                ) : (
-                                                                    <Button
-                                                                        size="small"
-                                                                        variant="outlined"
-                                                                        onClick={() => setAddPredictionDialog({
-                                                                            home_team: home,
-                                                                            away_team: away,
-                                                                            home_team_score: 0,
-                                                                            away_team_score: 0
-                                                                        })}
-                                                                    >
-                                                                        Add prediction
-                                                                    </Button>
-                                                                )}
-                                                            </Box>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                )
-                                            })}
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
-                            ) : adminSelectedMemberId && adminPredictionRound && !loadingAdminFixtures && adminFixturesForRound.length === 0 ? (
-                                <Typography variant="body2" color="text.secondary">No fixtures for this week.</Typography>
-                            ) : adminSelectedMemberId && !adminPredictionRound ? (
-                                <Typography variant="body2" color="text.secondary">Select a {isWorldCup ? 'day' : 'game week'} to view or add predictions.</Typography>
-                            ) : adminSelectedMemberId ? (
-                                <Typography variant="body2" color="text.secondary">Select a member and {isWorldCup ? 'day' : 'game week'} to edit or add missed picks.</Typography>
-                            ) : null}
-                        </Box>
-                    )}
-
                     {/* Results Section - mobile only (on desktop shown below predictions in left column) */}
                     {gameWeek && (
                         <Box sx={{ mt: 3, display: { xs: 'block', md: 'none' } }}>
@@ -1591,6 +1424,157 @@ function Members() {
                 </Box>
             </Grid>
         </Grid>
+
+        {isAdmin && (
+            <AdminPanel
+                open={adminPanelOpen}
+                onClose={() => setAdminPanelOpen(false)}
+                onSyncFixtures={syncFixtures}
+                onRefreshScores={() => refreshScores()}
+                onBackfill={() => setBackfillDialogOpen(true)}
+                onStartNewSeason={() => setNewSeasonDialogOpen(true)}
+                onDeleteLeague={() => {
+                    setDeleteLeagueError(null)
+                    setDeleteLeagueDialog(true)
+                }}
+                syncing={syncing}
+                startingNewSeason={startingNewSeason}
+            >
+                {leagueMembers.length > 0 && (
+                    <Box>
+                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Edit predictions &amp; fixture {isWorldCup ? 'days' : 'weeks'}</Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
+                            <FormControl size="small" fullWidth>
+                                <InputLabel>Select member</InputLabel>
+                                <Select
+                                    value={adminSelectedMemberId}
+                                    label="Select member"
+                                    onChange={(e) => setAdminSelectedMemberId(e.target.value)}
+                                >
+                                    <MenuItem value="">—</MenuItem>
+                                    {leagueMembers.map((m) => (
+                                        <MenuItem key={m.id} value={String(m.id)}>{m.display_name}</MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                            <FormControl size="small" fullWidth>
+                                <InputLabel>{weekOrDayLabel}</InputLabel>
+                                <Select
+                                    value={adminPredictionRound || ''}
+                                    label={weekOrDayLabel}
+                                    onChange={(e) => {
+                                        const r = e.target.value
+                                        setAdminPredictionRound(r)
+                                        if (!r) setAdminFixturesForRound([])
+                                    }}
+                                >
+                                    <MenuItem value="">—</MenuItem>
+                                    {availableRounds.map((r) => (
+                                        <MenuItem key={r} value={String(r)}>{weekOrDayTitle(r)}</MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                        </Box>
+                        {loadingMemberPredictions ? (
+                            <Typography variant="body2">Loading predictions...</Typography>
+                        ) : adminSelectedMemberId && adminPredictionRound && adminFixturesForRound.length > 0 ? (
+                            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 360, overflow: 'auto' }}>
+                                <Table size="small" stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell>Match</TableCell>
+                                            <TableCell align="center">Pred</TableCell>
+                                            <TableCell align="center">Actual</TableCell>
+                                            <TableCell align="right">Action</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {adminFixturesForRound.map((fix) => {
+                                            const home = fix.fixture_home_team || fix.home_team || ''
+                                            const away = fix.fixture_away_team || fix.away_team || ''
+                                            const norm = (s) => (String(s || '').toLowerCase().trim()
+                                                .replace(/&/g, ' and ')
+                                                .replace(/^afc\s+/, '').replace(/^fc\s+/, '')
+                                                .replace(/\s+fc\s*$/i, '').replace(/\s+afc\s*$/i, '')
+                                                .replace(/\s+/g, ' ')
+                                            )
+                                            const pred = adminMemberPredictions.find(p => p?.fixture?.id && fix?.id && Number(p.fixture.id) === Number(fix.id))
+                                                || adminMemberPredictions.find(p => p?.home_team != null && p?.away_team != null && norm(p.home_team) === norm(home) && norm(p.away_team) === norm(away))
+                                            const actualFromPred = pred?.fixture && pred.fixture.actual_home_score != null && pred.fixture.actual_away_score != null
+                                                ? `${pred.fixture.actual_home_score}–${pred.fixture.actual_away_score}`
+                                                : (fix.actual_home_score != null && fix.actual_away_score != null ? `${fix.actual_home_score}–${fix.actual_away_score}` : '–')
+                                            return (
+                                                <TableRow key={fix.id || `${home}-${away}`}>
+                                                    <TableCell sx={{ fontSize: '0.8rem' }}>{home} vs {away}</TableCell>
+                                                    <TableCell align="center" sx={{ fontSize: '0.8rem' }}>
+                                                        {pred ? `${pred.home_team_score ?? '–'}–${pred.away_team_score ?? '–'}` : <Typography variant="body2" color="text.secondary">No pick</Typography>}
+                                                    </TableCell>
+                                                    <TableCell align="center" sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>
+                                                        {actualFromPred}
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, flexWrap: 'wrap' }}>
+                                                            <Button
+                                                                size="small"
+                                                                variant="text"
+                                                                onClick={() => setRoundOverrideDialog({
+                                                                    fixtureId: fix.id,
+                                                                    home_team: home,
+                                                                    away_team: away,
+                                                                    current_round: fix.fixture_round,
+                                                                    new_round: String(fix.fixture_round ?? ''),
+                                                                    manual_round_override: true,
+                                                                })}
+                                                            >
+                                                                Set {isWorldCup ? 'day' : 'week'}
+                                                            </Button>
+                                                            {pred ? (
+                                                                <IconButton
+                                                                    size="small"
+                                                                    aria-label="Edit prediction"
+                                                                    onClick={() => setEditPredictionDialog({
+                                                                        gameId: pred.id,
+                                                                        home_team: pred.home_team,
+                                                                        away_team: pred.away_team,
+                                                                        home_team_score: pred.home_team_score ?? 0,
+                                                                        away_team_score: pred.away_team_score ?? 0
+                                                                    })}
+                                                                >
+                                                                    <EditIcon fontSize="small" />
+                                                                </IconButton>
+                                                            ) : (
+                                                                <Button
+                                                                    size="small"
+                                                                    variant="outlined"
+                                                                    onClick={() => setAddPredictionDialog({
+                                                                        home_team: home,
+                                                                        away_team: away,
+                                                                        home_team_score: 0,
+                                                                        away_team_score: 0
+                                                                    })}
+                                                                >
+                                                                    Add
+                                                                </Button>
+                                                            )}
+                                                        </Box>
+                                                    </TableCell>
+                                                </TableRow>
+                                            )
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        ) : adminSelectedMemberId && adminPredictionRound && !loadingAdminFixtures && adminFixturesForRound.length === 0 ? (
+                            <Typography variant="body2" color="text.secondary">No fixtures for this {isWorldCup ? 'day' : 'week'}.</Typography>
+                        ) : adminSelectedMemberId && !adminPredictionRound ? (
+                            <Typography variant="body2" color="text.secondary">Select a {isWorldCup ? 'day' : 'game week'} to view or add predictions.</Typography>
+                        ) : (
+                            <Typography variant="body2" color="text.secondary">Select a member and {isWorldCup ? 'day' : 'game week'} to edit or add missed picks.</Typography>
+                        )}
+                    </Box>
+                )}
+            </AdminPanel>
+        )}
 
         {/* Start new season (admin) */}
         <Dialog open={newSeasonDialogOpen} onClose={() => !startingNewSeason && setNewSeasonDialogOpen(false)} maxWidth="sm" fullWidth>
