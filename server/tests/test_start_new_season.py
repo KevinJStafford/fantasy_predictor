@@ -8,7 +8,11 @@ def test_game_for_fixture_ignores_prior_season_games():
     from app import _game_for_fixture
 
     season_start = datetime(2026, 8, 1, tzinfo=timezone.utc)
-    fixture = SimpleNamespace(fixture_home_team='Arsenal', fixture_away_team='Chelsea')
+    fixture = SimpleNamespace(
+        fixture_home_team='Arsenal',
+        fixture_away_team='Chelsea',
+        fixture_date=datetime(2026, 8, 16, 15, 0, tzinfo=timezone.utc),
+    )
     old_game = SimpleNamespace(
         home_team='Arsenal',
         away_team='Chelsea',
@@ -17,11 +21,25 @@ def test_game_for_fixture_ignores_prior_season_games():
     new_game = SimpleNamespace(
         home_team='Arsenal',
         away_team='Chelsea',
-        game_week=datetime(2026, 8, 20, tzinfo=timezone.utc),
+        game_week=datetime(2026, 8, 16, 15, 0, tzinfo=timezone.utc),
     )
 
     assert _game_for_fixture(fixture, [old_game], league_created_at=season_start) is None
     assert _game_for_fixture(fixture, [old_game, new_game], league_created_at=season_start) is new_game
+
+
+def test_game_for_fixture_ignores_undated_games_after_season_reset():
+    from app import _game_for_fixture
+
+    season_start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    fixture = SimpleNamespace(
+        fixture_home_team='Arsenal',
+        fixture_away_team='Chelsea',
+        fixture_date=datetime(2026, 8, 16, 15, 0, tzinfo=timezone.utc),
+    )
+    undated_game = SimpleNamespace(home_team='Arsenal', away_team='Chelsea', game_week=None)
+
+    assert _game_for_fixture(fixture, [undated_game], league_created_at=season_start) is None
 
 
 def test_start_new_season_requires_auth(client):

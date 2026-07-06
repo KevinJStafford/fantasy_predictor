@@ -94,26 +94,55 @@ def _fixture_matches_game(fixture, home_team, away_team):
     return False
 
 
-def _game_date_on_or_after_league(game, league_created_at):
+def _normalize_datetime_for_compare(dt):
+    """Return a comparable datetime, treating naive values as UTC."""
+    if dt is None:
+        return None
+    if getattr(dt, 'tzinfo', None) is None and hasattr(dt, 'replace'):
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _game_fixture_dates_align(game, fixture, max_delta_seconds=604800):
+    """True when prediction kickoff and fixture kickoff are close enough to be the same match."""
+    g_dt = getattr(game, 'game_week', None) if game else None
+    f_dt = getattr(fixture, 'fixture_date', None) if fixture else None
+    if g_dt is None or f_dt is None:
+        return False
+    try:
+        g_dt = _normalize_datetime_for_compare(g_dt)
+        f_dt = _normalize_datetime_for_compare(f_dt)
+        return abs((g_dt - f_dt).total_seconds()) <= max_delta_seconds
+    except (TypeError, AttributeError, ValueError):
+        return False
+
+
+def _game_date_on_or_after_league(game, league_created_at, strict_missing_date=False):
     """True if game date is on or after league scoring start (creation or new season)."""
     if league_created_at is None:
         return True
     if game is None:
         return False
-    return _fixture_date_on_or_after_league(None, game, league_created_at)
+    return _fixture_date_on_or_after_league(None, game, league_created_at, strict_missing_date=strict_missing_date)
 
 
 def _game_for_fixture(fixture, games_list, league_created_at=None):
     """Return first matching Game in games_list for a fixture.
 
-    When league_created_at is provided, only return games on/after that timestamp.
-    This prevents prior-season picks from being matched to a new season fixture that
-    happens to have the same home/away teams.
+    When league_created_at is provided, only return games on/after that timestamp with a
+    known kickoff that aligns to the fixture date. This prevents prior-season picks from
+    being matched to a new season fixture that happens to have the same home/away teams.
     """
     if not fixture or not games_list:
         return None
+    season_scoped = league_created_at is not None
     for g in games_list:
-        if not _game_date_on_or_after_league(g, league_created_at):
+        if season_scoped:
+            if not _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True):
+                continue
+            if not _game_fixture_dates_align(g, fixture):
+                continue
+        elif not _game_date_on_or_after_league(g, league_created_at):
             continue
         if _fixture_matches_game(fixture, g.home_team, g.away_team):
             return g
@@ -686,7 +715,10 @@ def _current_season_start_for_competition(comp_filter):
     q = db.session.query(func.max(Fixture.fixture_date)).filter(Fixture.fixture_date.isnot(None))
     if comp_filter is not None:
         q = q.filter(comp_filter)
-    row = q.first()
+    try:
+        row = q.first()
+    except Exception:
+        return None
     if not row or row[0] is None:
         return None
     latest = row[0]
@@ -3816,7 +3848,24 @@ def _league_scoring_start_at(league):
     return getattr(league, 'created_at', None)
 
 
-def _fixture_date_on_or_after_league(fixture, game, league_created_at):
+def _league_leaderboard_cutoff(league):
+    """Effective leaderboard floor: later of league reset/creation and current competition season."""
+    league_floor = _league_scoring_start_at(league)
+    comp_slug = getattr(league, 'competition_slug', None) or 'eng.1'
+    comp_floor = _current_season_start_for_competition(_fixture_query_competition(comp_slug))
+    if league_floor is None:
+        return comp_floor
+    if comp_floor is None:
+        return league_floor
+    lf = _normalize_datetime_for_compare(league_floor)
+    cf = _normalize_datetime_for_compare(comp_floor)
+    try:
+        return max(lf, cf)
+    except TypeError:
+        return league_floor
+
+
+def _fixture_date_on_or_after_league(fixture, game, league_created_at, strict_missing_date=False):
     """True if the fixture/game date is on or after the league scoring start (creation or new season)."""
     if league_created_at is None:
         return True
@@ -3826,7 +3875,7 @@ def _fixture_date_on_or_after_league(fixture, game, league_created_at):
     elif game and getattr(game, 'game_week', None) is not None:
         dt = game.game_week
     if dt is None:
-        return True  # include when date unknown so we don't exclude valid games from scoring
+        return not strict_missing_date
     # Compare as dates when possible so same calendar day counts (avoids timezone/midnight excluding fixtures)
     try:
         dt_date = dt.date() if hasattr(dt, 'date') and callable(getattr(dt, 'date')) else dt
@@ -3867,7 +3916,7 @@ def get_league_leaderboard(league_id):
         if not league:
             return make_response({'error': 'League not found'}, 404)
         
-        league_created_at = _league_scoring_start_at(league)
+        league_created_at = _league_leaderboard_cutoff(league)
         
         # Check if user is a member (and not soft-deleted)
         user = get_active_user_by_id(user_id)
@@ -3897,7 +3946,8 @@ def get_league_leaderboard(league_id):
         completed_fixtures = completed_fixtures.all()
         completed_fixtures = [
             f for f in completed_fixtures
-            if _fixture_date_on_or_after_league(f, None, league_created_at) and _fixture_scoreable(f)
+            if _fixture_date_on_or_after_league(f, None, league_created_at, strict_missing_date=True)
+            and _fixture_scoreable(f)
         ]
 
         # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
@@ -3933,7 +3983,7 @@ def get_league_leaderboard(league_id):
             if comp_filter is not None:
                 q_rounds = q_rounds.filter(comp_filter)
             for f in q_rounds.all():
-                if _fixture_date_on_or_after_league(f, None, league_created_at):
+                if _fixture_date_on_or_after_league(f, None, league_created_at, strict_missing_date=True):
                     all_fixtures_by_round.setdefault(f.fixture_round, []).append(f)
             # Round is complete when every fixture is scoreable or marked is_completed (e.g. rescheduled match)
             completed_rounds = []
@@ -3963,8 +4013,9 @@ def get_league_leaderboard(league_id):
                         if (
                             not fixture
                             or fixture.fixture_round != round_num
-                            or not _fixture_date_on_or_after_league(fixture, g, league_created_at)
-                            or not _game_date_on_or_after_league(g, league_created_at)
+                            or not _fixture_date_on_or_after_league(fixture, g, league_created_at, strict_missing_date=True)
+                            or not _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True)
+                            or not _game_fixture_dates_align(g, fixture)
                             or not _fixture_matches_league_competition(fixture, league)
                         ):
                             continue
@@ -3981,8 +4032,9 @@ def get_league_leaderboard(league_id):
                         if (
                             fx
                             and fx.fixture_round == round_num
-                            and _fixture_date_on_or_after_league(fx, g, league_created_at)
-                            and _game_date_on_or_after_league(g, league_created_at)
+                            and _fixture_date_on_or_after_league(fx, g, league_created_at, strict_missing_date=True)
+                            and _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True)
+                            and _game_fixture_dates_align(g, fx)
                             and _fixture_matches_league_competition(fx, league)
                         ):
                             rounds_with_pick.add(fx.fixture_round)
@@ -4045,8 +4097,9 @@ def get_league_leaderboard(league_id):
                         if (
                             not fixture
                             or not _round_eq(fixture.fixture_round, display_round)
-                            or not _fixture_date_on_or_after_league(fixture, g, league_created_at)
-                            or not _game_date_on_or_after_league(g, league_created_at)
+                            or not _fixture_date_on_or_after_league(fixture, g, league_created_at, strict_missing_date=True)
+                            or not _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True)
+                            or not _game_fixture_dates_align(g, fixture)
                             or not _fixture_matches_league_competition(fixture, league)
                         ):
                             continue
@@ -4063,8 +4116,9 @@ def get_league_leaderboard(league_id):
                         if (
                             fx
                             and _round_eq(fx.fixture_round, display_round)
-                            and _fixture_date_on_or_after_league(fx, g, league_created_at)
-                            and _game_date_on_or_after_league(g, league_created_at)
+                            and _fixture_date_on_or_after_league(fx, g, league_created_at, strict_missing_date=True)
+                            and _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True)
+                            and _game_fixture_dates_align(g, fx)
                             and _fixture_matches_league_competition(fx, league)
                         ):
                             rounds_with_pick.add(fx.fixture_round)
@@ -4120,6 +4174,8 @@ def get_league_leaderboard(league_id):
             # Fallback: if no completed fixtures in DB (e.g. sync didn't match) but games have game_result from check-results, count those so leaderboard isn't stuck at 0
             if (wins, draws, losses) == (lm.backfill_wins or 0, lm.backfill_draws or 0, lm.backfill_losses or 0) and not completed_fixtures:
                 for g in games:
+                    if not _game_date_on_or_after_league(g, league_created_at, strict_missing_date=True):
+                        continue
                     gr = getattr(g, 'game_result', None)
                     if gr == 'Win':
                         wins += 1
@@ -4196,6 +4252,12 @@ def start_new_league_season(league_id):
             except (TypeError, ValueError):
                 return make_response({'error': 'Invalid season_start (use ISO 8601 datetime)'}, 400)
 
+        comp_slug = getattr(league, 'competition_slug', None) or 'eng.1'
+        comp_season_start = _current_season_start_for_competition(_fixture_query_competition(comp_slug))
+        if comp_season_start is not None:
+            comp_start = _normalize_datetime_for_compare(comp_season_start)
+            season_start = max(_normalize_datetime_for_compare(season_start), comp_start)
+
         league.season_started_at = season_start
         members_reset = 0
         for lm in league.league_memberships:
@@ -4209,7 +4271,6 @@ def start_new_league_season(league_id):
 
         sync_result = None
         if data.get('sync_fixtures'):
-            comp_slug = getattr(league, 'competition_slug', None) or 'eng.1'
             sync_result = _sync_fixtures_for_competition_slug(comp_slug)
 
         db.session.commit()
