@@ -1205,7 +1205,15 @@ def _propagate_fixture_team_names_to_games(old_home, old_away, new_home, new_awa
         game.away_team = new_away
 
 
-def _sync_fixtures_espn(league_slug):
+def _parse_bool_param(val):
+    if val is True:
+        return True
+    if isinstance(val, str) and val.strip().lower() in ('1', 'true', 'yes'):
+        return True
+    return False
+
+
+def _sync_fixtures_espn(league_slug, scores_only=False):
     """Fetch fixtures from ESPN API for a given league (e.g. esp.1, fifa.world). Returns (added, updated, seen, error)."""
     comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('espn_slug') == league_slug or c.get('slug') == league_slug), None)
     competition_slug = (comp or {}).get('slug') or league_slug
@@ -1420,22 +1428,27 @@ def _sync_fixtures_espn(league_slug):
                         existing = c
                         break
         if existing:
-            old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
-            if not getattr(existing, 'manual_round_override', False):
-                existing.fixture_round = fixture_round
-            if item['fixture_date']:
-                existing.fixture_date = item['fixture_date']
-            existing.fixture_home_team = item['home_team']
-            existing.fixture_away_team = item['away_team']
-            existing.actual_home_score = item['home_score']
-            existing.actual_away_score = item['away_score']
-            existing.is_completed = item['is_completed']
-            if external_id:
-                existing.external_id = external_id
-            _propagate_fixture_team_names_to_games(
-                old_home, old_away, item['home_team'], item['away_team'], item.get('fixture_date'))
+            if scores_only:
+                existing.actual_home_score = item['home_score']
+                existing.actual_away_score = item['away_score']
+                existing.is_completed = item['is_completed']
+            else:
+                old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
+                if not getattr(existing, 'manual_round_override', False):
+                    existing.fixture_round = fixture_round
+                if item['fixture_date']:
+                    existing.fixture_date = item['fixture_date']
+                existing.fixture_home_team = item['home_team']
+                existing.fixture_away_team = item['away_team']
+                existing.actual_home_score = item['home_score']
+                existing.actual_away_score = item['away_score']
+                existing.is_completed = item['is_completed']
+                if external_id:
+                    existing.external_id = external_id
+                _propagate_fixture_team_names_to_games(
+                    old_home, old_away, item['home_team'], item['away_team'], item.get('fixture_date'))
             fixtures_updated += 1
-        else:
+        elif not scores_only:
             new_f = Fixture(
                 competition_slug=competition_slug,
                 external_id=external_id or None,
@@ -1456,7 +1469,7 @@ def _sync_fixtures_espn(league_slug):
 FOOTBALL_DATA_ORG_BASE = 'https://api.football-data.org/v4'
 
 
-def _sync_fixtures_football_data(competition_code, competition_slug):
+def _sync_fixtures_football_data(competition_code, competition_slug, scores_only=False):
     """Fetch fixtures from football-data.org for a competition (e.g. BL1 = Bundesliga). Returns (added, updated, seen, error)."""
     api_key = (os.getenv('FOOTBALL_DATA_ORG_API_KEY') or '').strip()
     if not api_key:
@@ -1569,22 +1582,27 @@ def _sync_fixtures_football_data(competition_code, competition_slug):
                             existing = c
                             break
         if existing:
-            old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
-            if not getattr(existing, 'manual_round_override', False):
-                existing.fixture_round = fixture_round
-            if fixture_date:
-                existing.fixture_date = fixture_date
-            existing.fixture_home_team = home_team
-            existing.fixture_away_team = away_team
-            existing.actual_home_score = home_score
-            existing.actual_away_score = away_score
-            existing.is_completed = is_completed
-            if external_id:
-                existing.external_id = external_id
-            existing.competition_slug = competition_slug
-            _propagate_fixture_team_names_to_games(old_home, old_away, home_team, away_team, fixture_date)
+            if scores_only:
+                existing.actual_home_score = home_score
+                existing.actual_away_score = away_score
+                existing.is_completed = is_completed
+            else:
+                old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
+                if not getattr(existing, 'manual_round_override', False):
+                    existing.fixture_round = fixture_round
+                if fixture_date:
+                    existing.fixture_date = fixture_date
+                existing.fixture_home_team = home_team
+                existing.fixture_away_team = away_team
+                existing.actual_home_score = home_score
+                existing.actual_away_score = away_score
+                existing.is_completed = is_completed
+                if external_id:
+                    existing.external_id = external_id
+                existing.competition_slug = competition_slug
+                _propagate_fixture_team_names_to_games(old_home, old_away, home_team, away_team, fixture_date)
             fixtures_updated += 1
-        else:
+        elif not scores_only:
             new_f = Fixture(
                 competition_slug=competition_slug,
                 external_id=external_id or None,
@@ -2529,10 +2547,12 @@ def sync_fixture_scores():
         if request.method == 'GET':
             competition_slug = (request.args.get('competition') or request.args.get('league_slug') or '').strip()
             api_url = request.args.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+            scores_only = _parse_bool_param(request.args.get('scores_only'))
         else:
             data = request.get_json() or {}
             competition_slug = (data.get('competition') or data.get('league_slug') or '').strip()
             api_url = data.get('api_url') or os.getenv('EXTERNAL_FIXTURES_API_URL')
+            scores_only = _parse_bool_param(data.get('scores_only'))
         
         # All leagues (including Premier League eng.1) use competition=slug; football-data.org or ESPN.
         if competition_slug:
@@ -2540,7 +2560,8 @@ def sync_fixture_scores():
             if comp and comp.get('source') == 'football_data':
                 added, updated, seen, err = _sync_fixtures_football_data(
                     comp.get('football_data_code') or 'BL1',
-                    competition_slug
+                    competition_slug,
+                    scores_only=scores_only,
                 )
                 if err:
                     return make_response({'error': err}, 500)
@@ -2551,9 +2572,13 @@ def sync_fixture_scores():
                     'updated': updated,
                     'fixtures_seen': seen,
                     'fixtures_updated': updated,
+                    'scores_only': scores_only,
                 }, 200)
             if comp and comp.get('source') == 'espn':
-                added, updated, seen, err = _sync_fixtures_espn(comp.get('espn_slug') or competition_slug)
+                added, updated, seen, err = _sync_fixtures_espn(
+                    comp.get('espn_slug') or competition_slug,
+                    scores_only=scores_only,
+                )
                 if err:
                     return make_response({'error': err}, 500)
                 db.session.commit()
@@ -2563,6 +2588,7 @@ def sync_fixture_scores():
                     'updated': updated,
                     'fixtures_seen': seen,
                     'fixtures_updated': updated,
+                    'scores_only': scores_only,
                 }, 200)
             if comp:
                 return make_response({'error': f'Unknown sync source for {competition_slug}'}, 400)
