@@ -1,5 +1,28 @@
 """Tests for POST /api/v1/leagues/<id>/start-new-season."""
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+
+def test_game_for_fixture_ignores_prior_season_games():
+    from app import _game_for_fixture
+
+    season_start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    fixture = SimpleNamespace(fixture_home_team='Arsenal', fixture_away_team='Chelsea')
+    old_game = SimpleNamespace(
+        home_team='Arsenal',
+        away_team='Chelsea',
+        game_week=datetime(2025, 8, 1, tzinfo=timezone.utc),
+    )
+    new_game = SimpleNamespace(
+        home_team='Arsenal',
+        away_team='Chelsea',
+        game_week=datetime(2026, 8, 20, tzinfo=timezone.utc),
+    )
+
+    assert _game_for_fixture(fixture, [old_game], league_created_at=season_start) is None
+    assert _game_for_fixture(fixture, [old_game, new_game], league_created_at=season_start) is new_game
+
 
 def test_start_new_season_requires_auth(client):
     resp = client.post('/api/v1/leagues/1/start-new-season', json={})
