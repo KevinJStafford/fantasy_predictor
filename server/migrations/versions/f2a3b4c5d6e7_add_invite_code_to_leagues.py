@@ -55,14 +55,20 @@ def upgrade():
             {"code": code, "id": league_id}
         )
     
-    if not has_invite_code:
-        op.alter_column('leagues', 'invite_code', nullable=False)
+    # SQLite cannot run ALTER COLUMN ... SET NOT NULL; use batch mode (table rebuild).
+    with op.batch_alter_table('leagues', schema=None) as batch_op:
+        batch_op.alter_column('invite_code', existing_type=sa.String(), nullable=False)
     try:
-        op.create_unique_constraint('uq_leagues_invite_code', 'leagues', ['invite_code'])
+        with op.batch_alter_table('leagues', schema=None) as batch_op:
+            batch_op.create_unique_constraint('uq_leagues_invite_code', ['invite_code'])
     except Exception:
         pass  # constraint may already exist
 
 
 def downgrade():
-    op.drop_constraint('uq_leagues_invite_code', 'leagues', type_='unique')
-    op.drop_column('leagues', 'invite_code')
+    with op.batch_alter_table('leagues', schema=None) as batch_op:
+        try:
+            batch_op.drop_constraint('uq_leagues_invite_code', type_='unique')
+        except Exception:
+            pass
+        batch_op.drop_column('invite_code')
