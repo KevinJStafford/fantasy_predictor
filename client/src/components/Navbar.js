@@ -19,7 +19,7 @@ function Navbar() {
     const [anchorEl, setAnchorEl] = React.useState(null);
     const [user, setUser] = React.useState(() => getCachedCurrentUser());
     const open = Boolean(anchorEl);
-    const logoUrl = (process.env.PUBLIC_URL || '') + '/header_logo.png?v=2';
+    const logoUrl = (process.env.PUBLIC_URL || '') + '/header_logo.png?v=3';
     const isLoggedIn = !!getToken();
 
     const fetchUser = React.useCallback(() => {

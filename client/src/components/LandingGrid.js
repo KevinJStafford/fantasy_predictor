@@ -331,10 +331,10 @@ function LandingGrid() {
                                     mb: 2.5,
                                 }}
                             >
-                                <Box component="span" sx={{ color: BRAND.accent }}>F</Box>
-                                <Box component="span" sx={{ color: BRAND.primary }}>ANTASY</Box>
+                                <Box component="span" sx={{ color: BRAND.primary }}>FANTASY</Box>
                                 <br />
-                                <Box component="span" sx={{ color: 'text.primary' }}>PREDICTOR</Box>
+                                <Box component="span" sx={{ color: BRAND.accent }}>P</Box>
+                                <Box component="span" sx={{ color: BRAND.primary }}>REDICTOR</Box>
                             </Typography>
                             <Typography
                                 sx={{
