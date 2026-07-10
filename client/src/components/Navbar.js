@@ -5,7 +5,7 @@ import { Box, AppBar, Toolbar, IconButton, Menu, MenuItem, ListItemIcon, ListIte
 import AccountBoxIcon from '@mui/icons-material/AccountBox';
 import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
-import { useHistory } from 'react-router-dom';
+import { useHistory, Link } from 'react-router-dom';
 import { getToken, removeToken } from '../utils/auth';
 import { authenticatedFetch, apiUrl } from '../utils/api';
 import {
@@ -19,7 +19,7 @@ function Navbar() {
     const [anchorEl, setAnchorEl] = React.useState(null);
     const [user, setUser] = React.useState(() => getCachedCurrentUser());
     const open = Boolean(anchorEl);
-    const logoUrl = (process.env.PUBLIC_URL || '') + '/typeface_logo_new.png';
+    const logoUrl = (process.env.PUBLIC_URL || '') + '/header_logo.png';
     const isLoggedIn = !!getToken();
 
     const fetchUser = React.useCallback(() => {
@@ -106,6 +106,9 @@ function Navbar() {
                 }}
             >
                 <Box
+                    component={Link}
+                    to="/"
+                    aria-label="Fantasy Predictor home"
                     sx={{
                         display: 'flex',
                         alignItems: 'center',
@@ -115,13 +118,15 @@ function Navbar() {
                         height: { xs: 36, sm: 44 },
                         flexShrink: 0,
                         overflow: 'hidden',
+                        textDecoration: 'none',
+                        color: 'inherit',
                     }}
                 >
                     <img
                         className="nav_logo"
                         src={logoUrl}
-                        alt="Fantasy Predictor text logo"
-                        style={{ height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'contain', objectPosition: 'center', display: 'block', verticalAlign: 'middle' }}
+                        alt="Fantasy Predictor"
+                        style={{ height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block', verticalAlign: 'middle' }}
                         onError={(e) => {
                             console.error('Navbar image failed to load');
                             e.target.style.display = 'none';
