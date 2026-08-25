@@ -91,3 +91,65 @@ def test_same_fixture_can_be_saved_independently_in_two_leagues(client, member_s
         assert len(games) == 2
         assert {g.league_id for g in games} == {first_league_id, second_league_id}
         assert {(g.home_team_score, g.away_team_score) for g in games} == {(2, 1), (0, 0)}
+
+
+def test_previous_season_pick_does_not_fill_or_replace_current_fixture(client, member_setup):
+    with app.app_context():
+        league = db.session.get(League, member_setup['league_id'])
+        league.season_started_at = datetime.now(timezone.utc)
+        old_kickoff = datetime.now(timezone.utc) - timedelta(days=365)
+        new_kickoff = datetime.now(timezone.utc) + timedelta(days=3)
+        old_fixture = Fixture(
+            fixture_round=2,
+            fixture_date=old_kickoff,
+            fixture_home_team='Tottenham Hotspur FC',
+            fixture_away_team='Newcastle United FC',
+            competition_slug='ger.1',
+        )
+        new_fixture = Fixture(
+            fixture_round=2,
+            fixture_date=new_kickoff,
+            fixture_home_team='Tottenham Hotspur FC',
+            fixture_away_team='Newcastle United FC',
+            competition_slug='ger.1',
+        )
+        old_game = Game(
+            user_id=member_setup['user_id'],
+            league_id=member_setup['league_id'],
+            home_team='Tottenham Hotspur FC',
+            away_team='Newcastle United FC',
+            home_team_score=1,
+            away_team_score=2,
+            game_week=old_kickoff,
+        )
+        db.session.add_all([old_fixture, new_fixture, old_game])
+        db.session.commit()
+        new_fixture_id = new_fixture.id
+
+    before = client.get(
+        f"/api/v1/predictions?league_id={member_setup['league_id']}",
+        headers=member_setup['headers'],
+    )
+    assert before.status_code == 200
+    assert before.get_json()['predictions'] == []
+
+    saved = client.post(
+        '/api/v1/predictions',
+        headers=member_setup['headers'],
+        json={
+            'fixture_id': new_fixture_id,
+            'league_id': member_setup['league_id'],
+            'home_team_score': 0,
+            'away_team_score': 0,
+        },
+    )
+    assert saved.status_code == 201
+
+    with app.app_context():
+        games = Game.query.filter_by(
+            user_id=member_setup['user_id'],
+            league_id=member_setup['league_id'],
+        ).order_by(Game.game_week).all()
+        assert len(games) == 2
+        assert (games[0].home_team_score, games[0].away_team_score) == (1, 2)
+        assert (games[1].home_team_score, games[1].away_team_score) == (0, 0)

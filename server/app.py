@@ -2162,6 +2162,7 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
     resolving many games in a loop."""
     # If we have a pre-loaded list, use it for all fallbacks (no DB hits in loop).
     if fixtures_list is not None:
+        matching_fixtures = []
         for f in fixtures_list:
             if not _fixture_matches_game(f, game.home_team, game.away_team):
                 continue
@@ -2170,9 +2171,15 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
                     continue
                 if competition_slug != 'eng.1' and f.competition_slug != competition_slug:
                     continue
-            return f
-        for f in fixtures_list:
-            if _fixture_matches_game(f, game.home_team, game.away_team):
+            matching_fixtures.append(f)
+        # The same home/away pairing repeats every season. Prefer the fixture
+        # whose kickoff aligns with the stored prediction date.
+        for f in matching_fixtures:
+            if _game_fixture_dates_align(game, f):
+                return f
+        # Preserve compatibility only for genuinely undated legacy records.
+        for f in matching_fixtures:
+            if game.game_week is None or f.fixture_date is None:
                 return f
         return None
     base = Fixture.query.filter_by(
@@ -2257,11 +2264,20 @@ class PredictionsResource(Resource):
                 if getattr(league, 'competition_slug', None):
                     competition_slug = league.competition_slug
             
-            # A league page must never receive games saved for another league.
-            user_games = Game.query.filter_by(
+            # A league page must never receive games saved for another league
+            # or from an earlier season of the same league.
+            user_games_query = Game.query.filter_by(
                 user_id=user_id,
                 league_id=league_id,
-            ).order_by(Game.game_week.asc()).all()
+            )
+            if league_id:
+                season_cutoff = _league_leaderboard_cutoff(league)
+                if season_cutoff is not None:
+                    user_games_query = user_games_query.filter(
+                        Game.game_week.isnot(None),
+                        Game.game_week >= season_cutoff,
+                    )
+            user_games = user_games_query.order_by(Game.game_week.asc()).all()
             
             # Preload fixtures once to avoid N+1: each _fixture_for_game would otherwise do Fixture.query.all()
             comp_filter = _fixture_query_competition(competition_slug) if competition_slug else None
@@ -2376,12 +2392,16 @@ class PredictionsResource(Resource):
                     return make_response({'error': 'Cannot create or update prediction after kickoff'}, 403)
             
             # Check if user already has a prediction for this fixture
-            existing_game = Game.query.filter_by(
+            existing_games = Game.query.filter_by(
                 user_id=user_id,
                 league_id=league_id,
                 home_team=fixture.fixture_home_team,
                 away_team=fixture.fixture_away_team
-            ).first()
+            ).all()
+            existing_game = next(
+                (game for game in existing_games if _game_fixture_dates_align(game, fixture)),
+                None,
+            )
             
             if existing_game:
                 # Update existing prediction
@@ -3805,10 +3825,17 @@ def get_member_predictions_for_admin(league_id, member_user_id):
         league_comp = getattr(league, 'competition_slug', None) or 'eng.1'
         comp_filter = _fixture_query_competition(league_comp)
         all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all()
-        user_games = Game.query.filter_by(
+        user_games_query = Game.query.filter_by(
             user_id=member_user_id,
             league_id=league_id,
-        ).order_by(Game.game_week.asc()).all()
+        )
+        season_cutoff = _league_leaderboard_cutoff(league)
+        if season_cutoff is not None:
+            user_games_query = user_games_query.filter(
+                Game.game_week.isnot(None),
+                Game.game_week >= season_cutoff,
+            )
+        user_games = user_games_query.order_by(Game.game_week.asc()).all()
         predictions = []
         for game in user_games:
             fixture = _fixture_for_game(game, league_comp, fixtures_list=all_fixtures)
@@ -3859,28 +3886,36 @@ def admin_create_member_prediction(league_id, member_user_id):
             return make_response({'error': 'home_team_score and away_team_score must be integers'}, 400)
         if not home_team or not away_team:
             return make_response({'error': 'home_team and away_team are required'}, 400)
-        # Find fixture (case-insensitive)
-        fixture = Fixture.query.filter_by(
-            fixture_home_team=home_team,
-            fixture_away_team=away_team
-        ).first()
-        if not fixture:
-            for f in Fixture.query.all():
-                if (f.fixture_home_team or '').lower().strip() == home_team.lower() and (f.fixture_away_team or '').lower().strip() == away_team.lower():
-                    fixture = f
-                    break
+        # Find the current-season fixture; the same pairing exists in prior seasons.
+        season_cutoff = _league_leaderboard_cutoff(league)
+        fixture = None
+        for f in Fixture.query.all():
+            names_match = (
+                (f.fixture_home_team or '').lower().strip() == home_team.lower()
+                and (f.fixture_away_team or '').lower().strip() == away_team.lower()
+            )
+            if not names_match or not _fixture_matches_league_competition(f, league):
+                continue
+            if season_cutoff is not None and not _fixture_date_on_or_after_league(
+                f, None, season_cutoff, strict_missing_date=True
+            ):
+                continue
+            fixture = f
+            break
         if not fixture:
             return make_response({'error': f'Fixture not found for {home_team} vs {away_team}'}, 404)
-        if not _fixture_matches_league_competition(fixture, league):
-            return make_response({'error': 'Fixture does not belong to this league competition'}, 400)
         # Use fixture's exact names for the Game
         f_home, f_away = fixture.fixture_home_team, fixture.fixture_away_team
-        existing = Game.query.filter_by(
+        existing_games = Game.query.filter_by(
             user_id=member_user_id,
             league_id=league_id,
             home_team=f_home,
             away_team=f_away,
-        ).first()
+        ).all()
+        existing = next(
+            (game for game in existing_games if _game_fixture_dates_align(game, fixture)),
+            None,
+        )
         if existing:
             return make_response({'error': 'Member already has a prediction for this fixture; use PATCH to update', 'game_id': existing.id}, 400)
         game = Game(
