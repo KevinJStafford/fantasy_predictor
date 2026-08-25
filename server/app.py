@@ -277,13 +277,14 @@ def _send_missing_predictions_notifications():
                 for fixture in fixtures:
                     g = Game.query.filter_by(
                         user_id=lm.user_id,
+                        league_id=league.id,
                         home_team=fixture.fixture_home_team,
                         away_team=fixture.fixture_away_team,
                     ).first()
                     if g:
                         has_any = True
                         break
-                    for g in Game.query.filter_by(user_id=lm.user_id).all():
+                    for g in Game.query.filter_by(user_id=lm.user_id, league_id=league.id).all():
                         if _fixture_matches_game(fixture, g.home_team, g.away_team):
                             has_any = True
                             break
@@ -2237,8 +2238,8 @@ def _fixture_for_game(game, competition_slug=None, fixtures_list=None):
 class PredictionsResource(Resource):
     def get(self):
         """Get all predictions for the current user with their results.
-        Optional query: ?league_id= to resolve fixtures in that league's competition (fixes
-        Championship etc. so completed predictions show for the correct competition)."""
+        Optional query: ?league_id= returns only predictions owned by that league.
+        Without league_id, only standalone predictions are returned."""
         try:
             user_id = get_current_user_id()
             
@@ -2249,11 +2250,18 @@ class PredictionsResource(Resource):
             league_id = request.args.get('league_id', type=int)
             if league_id:
                 league = db.session.get(League, league_id)
-                if league and getattr(league, 'competition_slug', None):
+                if not league:
+                    return make_response({'error': 'League not found'}, 404)
+                if not get_league_membership(user_id, league_id):
+                    return make_response({'error': 'User is not a member of this league'}, 403)
+                if getattr(league, 'competition_slug', None):
                     competition_slug = league.competition_slug
             
-            # Get all user's predictions, sorted by date (oldest first)
-            user_games = Game.query.filter_by(user_id=user_id).order_by(Game.game_week.asc()).all()
+            # A league page must never receive games saved for another league.
+            user_games = Game.query.filter_by(
+                user_id=user_id,
+                league_id=league_id,
+            ).order_by(Game.game_week.asc()).all()
             
             # Preload fixtures once to avoid N+1: each _fixture_for_game would otherwise do Fixture.query.all()
             comp_filter = _fixture_query_competition(competition_slug) if competition_slug else None
@@ -2334,14 +2342,29 @@ class PredictionsResource(Resource):
             fixture_id = data.get('fixture_id')
             home_team_score = data.get('home_team_score')
             away_team_score = data.get('away_team_score')
+            league_id = data.get('league_id')
             
             if not fixture_id or home_team_score is None or away_team_score is None:
                 return make_response({'error': 'Missing required fields: fixture_id, home_team_score, away_team_score'}, 400)
+
+            league = None
+            if league_id is not None:
+                try:
+                    league_id = int(league_id)
+                except (TypeError, ValueError):
+                    return make_response({'error': 'league_id must be an integer'}, 400)
+                league = db.session.get(League, league_id)
+                if not league:
+                    return make_response({'error': 'League not found'}, 404)
+                if not get_league_membership(user_id, league_id):
+                    return make_response({'error': 'User is not a member of this league'}, 403)
             
             # Get the fixture
             fixture = db.session.get(Fixture, fixture_id)
             if not fixture:
                 return make_response({'error': 'Fixture not found'}, 404)
+            if league and not _fixture_matches_league_competition(fixture, league):
+                return make_response({'error': 'Fixture does not belong to this league competition'}, 400)
             
             # Lock predictions after kickoff: do not allow create or update once the game has started
             if fixture.fixture_date:
@@ -2355,6 +2378,7 @@ class PredictionsResource(Resource):
             # Check if user already has a prediction for this fixture
             existing_game = Game.query.filter_by(
                 user_id=user_id,
+                league_id=league_id,
                 home_team=fixture.fixture_home_team,
                 away_team=fixture.fixture_away_team
             ).first()
@@ -2369,6 +2393,7 @@ class PredictionsResource(Resource):
                 # Create new game/prediction
                 game = Game(
                     user_id=user_id,
+                    league_id=league_id,
                     home_team=fixture.fixture_home_team,
                     away_team=fixture.fixture_away_team,
                     home_team_score=int(home_team_score),
@@ -3614,6 +3639,15 @@ def delete_league(league_id):
         if not db.session.get(League, league_id):
             return make_response({'error': 'League not found'}, 404)
         # Bulk deletes avoid ORM cascade on stale in-memory memberships (faster, no hang).
+        game_ids = [
+            row[0]
+            for row in db.session.query(Game.id).filter(Game.league_id == league_id).all()
+        ]
+        if game_ids:
+            Prediction.query.filter(Prediction.game_id.in_(game_ids)).delete(
+                synchronize_session=False
+            )
+            Game.query.filter(Game.id.in_(game_ids)).delete(synchronize_session=False)
         LeagueWeekWinner.query.filter_by(league_id=league_id).delete(synchronize_session=False)
         LeagueMembership.query.filter_by(league_id=league_id).delete(synchronize_session=False)
         deleted = League.query.filter_by(id=league_id).delete(synchronize_session=False)
@@ -3645,6 +3679,8 @@ def admin_update_prediction(league_id, game_id):
         game = db.session.get(Game, game_id)
         if not game:
             return make_response({'error': 'Prediction/game not found'}, 404)
+        if game.league_id != league_id:
+            return make_response({'error': 'That prediction does not belong to this league'}, 403)
         # Game must belong to a member of this league
         if not get_league_membership(game.user_id, league_id):
             return make_response({'error': 'That prediction is not from a member of this league'}, 403)
@@ -3769,7 +3805,10 @@ def get_member_predictions_for_admin(league_id, member_user_id):
         league_comp = getattr(league, 'competition_slug', None) or 'eng.1'
         comp_filter = _fixture_query_competition(league_comp)
         all_fixtures = Fixture.query.filter(comp_filter).all() if comp_filter is not None else Fixture.query.all()
-        user_games = Game.query.filter_by(user_id=member_user_id).order_by(Game.game_week.asc()).all()
+        user_games = Game.query.filter_by(
+            user_id=member_user_id,
+            league_id=league_id,
+        ).order_by(Game.game_week.asc()).all()
         predictions = []
         for game in user_games:
             fixture = _fixture_for_game(game, league_comp, fixtures_list=all_fixtures)
@@ -3832,13 +3871,21 @@ def admin_create_member_prediction(league_id, member_user_id):
                     break
         if not fixture:
             return make_response({'error': f'Fixture not found for {home_team} vs {away_team}'}, 404)
+        if not _fixture_matches_league_competition(fixture, league):
+            return make_response({'error': 'Fixture does not belong to this league competition'}, 400)
         # Use fixture's exact names for the Game
         f_home, f_away = fixture.fixture_home_team, fixture.fixture_away_team
-        existing = Game.query.filter_by(user_id=member_user_id, home_team=f_home, away_team=f_away).first()
+        existing = Game.query.filter_by(
+            user_id=member_user_id,
+            league_id=league_id,
+            home_team=f_home,
+            away_team=f_away,
+        ).first()
         if existing:
             return make_response({'error': 'Member already has a prediction for this fixture; use PATCH to update', 'game_id': existing.id}, 400)
         game = Game(
             user_id=member_user_id,
+            league_id=league_id,
             home_team=f_home,
             away_team=f_away,
             home_team_score=home_team_score,
@@ -3958,7 +4005,10 @@ def get_league_leaderboard(league_id):
 
         def _member_has_game_for_fixture(member_id, fixture, games_list=None):
             """True if member has a Game (prediction) for this fixture (using league competition for matching)."""
-            games = games_list if games_list is not None else Game.query.filter_by(user_id=member_id).all()
+            games = games_list if games_list is not None else Game.query.filter_by(
+                user_id=member_id,
+                league_id=league_id,
+            ).all()
             return _game_for_fixture(fixture, games, league_created_at=league_created_at) is not None
 
         comp_filter = _fixture_query_competition(league_competition_slug)
@@ -3978,7 +4028,10 @@ def get_league_leaderboard(league_id):
 
         # Preload all games for all league members to avoid N+1 (one query instead of per-member, per-fixture)
         member_ids = [lm.user.id for lm in league.league_memberships if not getattr(lm.user, 'deleted_at', None)]
-        all_member_games = Game.query.filter(Game.user_id.in_(member_ids)).all() if member_ids else []
+        all_member_games = Game.query.filter(
+            Game.user_id.in_(member_ids),
+            Game.league_id == league_id,
+        ).all() if member_ids else []
         games_by_user = {}
         for g in all_member_games:
             games_by_user.setdefault(g.user_id, []).append(g)

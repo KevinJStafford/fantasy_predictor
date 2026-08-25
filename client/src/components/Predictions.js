@@ -110,6 +110,7 @@ function Predictions({ fixture, existingPrediction, onPredictionSaved, asTableRo
                 method: 'POST',
                 body: JSON.stringify({
                     fixture_id: id,
+                    league_id: leagueId,
                     home_team_score: parseInt(values.home_team_score),
                     away_team_score: parseInt(values.away_team_score)
                 })

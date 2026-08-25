@@ -107,12 +107,16 @@ class Game(db.Model, SerializerMixin):
     away_team_score = db.Column(db.Integer)
     game_result = db.Column(db.String)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    # Null is reserved for standalone/legacy predictions made outside a league.
+    # League pages must always filter by this field to prevent cross-league bleed.
+    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
 
     # Relationships
     # predictions = db.relationship('Prediction', back_populates='game', cascade='all, delete-orphan')
     # users = association_proxy('predictions', 'user')
+    __table_args__ = (db.Index('ix_games_league_id', 'league_id'),)
 
 class Fixture(db.Model, SerializerMixin):
     __tablename__ = 'fixtures'
@@ -123,15 +127,20 @@ class Fixture(db.Model, SerializerMixin):
     fixture_home_team = db.Column(db.String)
     fixture_away_team = db.Column(db.String)
     # Competition/league: e.g. eng.1 (EPL), esp.1 (La Liga), fra.1, ger.1, usa.1, fifa.world (World Cup). Null = legacy EPL.
-    competition_slug = db.Column(db.String, nullable=True, index=True)
+    competition_slug = db.Column(db.String, nullable=True)
     # External API id (e.g. ESPN event id) for deduplication when syncing
-    external_id = db.Column(db.String, nullable=True, index=True)
+    external_id = db.Column(db.String, nullable=True)
     # Actual scores from completed matches
     actual_home_score = db.Column(db.Integer, nullable=True)
     actual_away_score = db.Column(db.Integer, nullable=True)
     is_completed = db.Column(db.Boolean, default=False)
     # When True, fixture sync will not overwrite fixture_round.
     manual_round_override = db.Column(db.Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        db.Index('ix_fixtures_competition_slug', 'competition_slug'),
+        db.Index('ix_fixtures_external_id', 'external_id'),
+    )
 
     def __repr__(self):
         return f'<Fixture {self.id}: {self.fixture_home_team} vs {self.fixture_away_team}>'
