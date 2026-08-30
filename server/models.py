@@ -134,7 +134,7 @@ class Fixture(db.Model, SerializerMixin):
     actual_home_score = db.Column(db.Integer, nullable=True)
     actual_away_score = db.Column(db.Integer, nullable=True)
     is_completed = db.Column(db.Boolean, default=False)
-    # When True, fixture sync will not overwrite fixture_round.
+    # When True, fixture sync will not overwrite fixture_round, scores, or is_completed.
     manual_round_override = db.Column(db.Boolean, nullable=False, default=False)
 
     __table_args__ = (

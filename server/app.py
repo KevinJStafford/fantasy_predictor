@@ -1214,6 +1214,57 @@ def _parse_bool_param(val):
     return False
 
 
+def _coerce_score(val):
+    """Parse a score value. 0 is valid; None/empty is missing."""
+    if val is None or val == '':
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scores_from_api_map(score_map):
+    """Read home/away scores from football-data fullTime/regularTime (v2 or v4 keys)."""
+    if not isinstance(score_map, dict):
+        return None, None
+    home = score_map.get('home')
+    if home is None:
+        home = score_map.get('homeTeam')
+    away = score_map.get('away')
+    if away is None:
+        away = score_map.get('awayTeam')
+    return _coerce_score(home), _coerce_score(away)
+
+
+def _apply_api_scores_to_fixture(existing, home_score, away_score, is_completed):
+    """Copy API scores onto a fixture.
+
+    Respects manual_round_override (same lock used to keep a hand-set week/day):
+    a locked fixture is not score-updated by sync. Also never replace stored
+    scores with nulls — football-data.org can leave some finished matches as
+    TIMED + empty fullTime while returning scores for others on the same day.
+    """
+    if getattr(existing, 'manual_round_override', False):
+        return False
+    home_score = _coerce_score(home_score)
+    away_score = _coerce_score(away_score)
+    api_has_scores = home_score is not None and away_score is not None
+    if not api_has_scores:
+        return False
+    already_stored = (
+        getattr(existing, 'actual_home_score', None) is not None
+        and getattr(existing, 'actual_away_score', None) is not None
+    )
+    if already_stored and getattr(existing, 'is_completed', False) and not is_completed:
+        return False
+    existing.actual_home_score = home_score
+    existing.actual_away_score = away_score
+    if is_completed:
+        existing.is_completed = True
+    return True
+
+
 def _sync_fixtures_espn(league_slug, scores_only=False):
     """Fetch fixtures from ESPN API for a given league (e.g. esp.1, fifa.world). Returns (added, updated, seen, error)."""
     comp = next((c for c in SUPPORTED_COMPETITIONS if c.get('espn_slug') == league_slug or c.get('slug') == league_slug), None)
@@ -1430,9 +1481,8 @@ def _sync_fixtures_espn(league_slug, scores_only=False):
                         break
         if existing:
             if scores_only:
-                existing.actual_home_score = item['home_score']
-                existing.actual_away_score = item['away_score']
-                existing.is_completed = item['is_completed']
+                _apply_api_scores_to_fixture(
+                    existing, item['home_score'], item['away_score'], item['is_completed'])
             else:
                 old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
                 if not getattr(existing, 'manual_round_override', False):
@@ -1441,9 +1491,8 @@ def _sync_fixtures_espn(league_slug, scores_only=False):
                     existing.fixture_date = item['fixture_date']
                 existing.fixture_home_team = item['home_team']
                 existing.fixture_away_team = item['away_team']
-                existing.actual_home_score = item['home_score']
-                existing.actual_away_score = item['away_score']
-                existing.is_completed = item['is_completed']
+                _apply_api_scores_to_fixture(
+                    existing, item['home_score'], item['away_score'], item['is_completed'])
                 if external_id:
                     existing.external_id = external_id
                 _propagate_fixture_team_names_to_games(
@@ -1518,35 +1567,11 @@ def _sync_fixtures_football_data(competition_code, competition_slug, scores_only
         if not home_team or not away_team:
             continue
         score = m.get('score') or {}
-        full_time = score.get('fullTime') if isinstance(score, dict) else None
         home_score = away_score = None
-        if isinstance(full_time, dict):
-            home_score = full_time.get('homeTeam') or full_time.get('home')
-            away_score = full_time.get('awayTeam') or full_time.get('away')
-            if home_score is not None:
-                try:
-                    home_score = int(home_score)
-                except (TypeError, ValueError):
-                    home_score = None
-            if away_score is not None:
-                try:
-                    away_score = int(away_score)
-                except (TypeError, ValueError):
-                    away_score = None
-        if home_score is None and away_score is None and isinstance(score.get('regularTime'), dict):
-            rt = score['regularTime']
-            home_score = rt.get('homeTeam') or rt.get('home')
-            away_score = rt.get('awayTeam') or rt.get('away')
-            if home_score is not None:
-                try:
-                    home_score = int(home_score)
-                except (TypeError, ValueError):
-                    home_score = None
-            if away_score is not None:
-                try:
-                    away_score = int(away_score)
-                except (TypeError, ValueError):
-                    away_score = None
+        if isinstance(score, dict):
+            home_score, away_score = _scores_from_api_map(score.get('fullTime'))
+            if home_score is None and away_score is None:
+                home_score, away_score = _scores_from_api_map(score.get('regularTime'))
         status = (m.get('status') or '').upper()
         is_completed = status == 'FINISHED'
         existing = Fixture.query.filter_by(competition_slug=competition_slug, external_id=external_id).first() if external_id else None
@@ -1584,9 +1609,7 @@ def _sync_fixtures_football_data(competition_code, competition_slug, scores_only
                             break
         if existing:
             if scores_only:
-                existing.actual_home_score = home_score
-                existing.actual_away_score = away_score
-                existing.is_completed = is_completed
+                _apply_api_scores_to_fixture(existing, home_score, away_score, is_completed)
             else:
                 old_home, old_away = existing.fixture_home_team, existing.fixture_away_team
                 if not getattr(existing, 'manual_round_override', False):
@@ -1595,9 +1618,7 @@ def _sync_fixtures_football_data(competition_code, competition_slug, scores_only
                     existing.fixture_date = fixture_date
                 existing.fixture_home_team = home_team
                 existing.fixture_away_team = away_team
-                existing.actual_home_score = home_score
-                existing.actual_away_score = away_score
-                existing.is_completed = is_completed
+                _apply_api_scores_to_fixture(existing, home_score, away_score, is_completed)
                 if external_id:
                     existing.external_id = external_id
                 existing.competition_slug = competition_slug
