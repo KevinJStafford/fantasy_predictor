@@ -13,6 +13,15 @@ import Leagues from "./Leagues";
 import Profile from "./Profile";
 import BracketHub from "./brackets/BracketHub";
 import BracketBuilder from "./brackets/BracketBuilder";
+import LineupPitch from "./LineupPitch";
+
+function isStartingElevenHost() {
+  const host = window.location.hostname;
+  return (
+    host === "startingeleven.playfantasypredictor.com" ||
+    host === "startingeleven.localhost"
+  );
+}
 
 function App() {
   // eslint-disable-next-line no-unused-vars
@@ -26,6 +35,14 @@ function App() {
       window.location.replace(`/reset-password${query}`);
     }
   }, []);
+
+  if (isStartingElevenHost()) {
+    return (
+      <main>
+        <LineupPitch />
+      </main>
+    );
+  }
 
   return (
     <main>
@@ -67,6 +84,9 @@ function App() {
         <Route exact path="/results">
           <Navbar />
           <div style={{ padding: 24 }}>Results (coming soon)</div>
+        </Route>
+        <Route exact path="/lineup">
+          <LineupPitch />
         </Route>
         {/* Fallback: avoid blank screen if path doesn't match */}
         <Route path="*">

@@ -46,6 +46,24 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=Roboto:wght@300;400;500;600;700&display=swap"/>
     <title>Fantasy Predictor</title>
+    <script>
+      (function () {
+        var host = location.hostname;
+        if (
+          host === "startingeleven.playfantasypredictor.com" ||
+          host === "startingeleven.localhost"
+        ) {
+          document.title = "Starting Eleven";
+          var desc = document.querySelector('meta[name="description"]');
+          if (desc) {
+            desc.setAttribute(
+              "content",
+              "Upload headshots and drag them into position on a football pitch."
+            );
+          }
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
