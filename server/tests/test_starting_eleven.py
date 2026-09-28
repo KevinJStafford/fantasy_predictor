@@ -71,6 +71,14 @@ def test_lineup_is_private_to_each_account(client):
     assert saved.status_code == 200
     assert saved.get_json()['assignments'] == {'gk': player_id}
 
+    managed = client.put('/api/v1/starting-eleven/lineup', json={
+        'formation': '4-4-2',
+        'assignments': {'mgr': player_id, 'not-a-slot': player_id},
+    }, headers=first)
+    assert managed.status_code == 200
+    assert managed.get_json()['assignments'] == {'mgr': player_id}
+    assert managed.get_json()['formation'] == '4-4-2'
+
     other = client.get('/api/v1/starting-eleven/lineup', headers=second)
     assert other.status_code == 200
     assert other.get_json()['players'] == []

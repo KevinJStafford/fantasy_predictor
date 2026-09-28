@@ -47,7 +47,8 @@ def register_lineup_routes(app, get_current_user_id, get_active_user_by_id, get_
         return row
 
     def _clean_assignments(formation, raw, owned_ids):
-        slots = FORMATION_SLOTS.get(formation) or FORMATION_SLOTS['4-3-3']
+        slots = set(FORMATION_SLOTS.get(formation) or FORMATION_SLOTS['4-3-3'])
+        slots.add('mgr')
         if not isinstance(raw, dict):
             return {}
         cleaned = {}
