@@ -830,7 +830,19 @@ function LineupPitch() {
                     </Box>
                 </Box>
             </Box>
-            <Box sx={{ maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 2.5, sm: 4 } }}>
+            <Box
+                sx={{
+                    maxWidth: 1120,
+                    mx: "auto",
+                    px: { xs: 2, sm: 3 },
+                    py: { xs: 2.5, sm: 4 },
+                    height: { md: "calc(100vh - 64px)" },
+                    display: { md: "flex" },
+                    flexDirection: { md: "column" },
+                    overflow: { md: "hidden" },
+                    boxSizing: "border-box",
+                }}
+            >
                 {authStatus !== "ready" ? (
                     authStatus === "loading" ? (
                         <Typography sx={{ color: "text.secondary" }}>Loading your squad…</Typography>
@@ -854,6 +866,7 @@ function LineupPitch() {
                         justifyContent: "space-between",
                         gap: 2,
                         mb: 3,
+                        flexShrink: 0,
                     }}
                 >
                     <Box>
@@ -917,7 +930,9 @@ function LineupPitch() {
                         display: "grid",
                         gridTemplateColumns: { xs: "1fr", md: "320px 1fr" },
                         gap: { xs: 2.5, md: 3 },
-                        alignItems: "start",
+                        alignItems: { xs: "start", md: "stretch" },
+                        flex: { md: 1 },
+                        minHeight: { md: 0 },
                     }}
                 >
                     <Box
@@ -936,6 +951,11 @@ function LineupPitch() {
                             border: "1px solid rgba(0,0,0,0.06)",
                             boxShadow: "0 10px 30px rgba(20,40,28,0.06)",
                             p: 2,
+                            height: { md: "100%" },
+                            minHeight: { md: 0 },
+                            display: { md: "flex" },
+                            flexDirection: { md: "column" },
+                            overflow: { md: "hidden" },
                             outline:
                                 drag?.over === "bench"
                                     ? "2px solid #ff6c26"
@@ -1018,7 +1038,7 @@ function LineupPitch() {
                             </Box>
                         )}
 
-                        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: { md: 1 }, minHeight: { md: 0 }, overflowY: { md: "auto" }, pr: { md: 0.5 } }}>
                             {players.map((player) => {
                                 const slotId = slotOf(player.id);
                                 const slot = slots.find((item) => item.id === slotId);
@@ -1107,12 +1127,23 @@ function LineupPitch() {
                         </Box>
                     </Box>
 
-                    <Box sx={{ order: { xs: 1, md: 2 } }}>
+                    <Box
+                        sx={{
+                            order: { xs: 1, md: 2 },
+                            alignSelf: { md: "stretch" },
+                            minHeight: { md: 0 },
+                            display: { md: "flex" },
+                            alignItems: { md: "center" },
+                            justifyContent: { md: "center" },
+                        }}
+                    >
                         <Box
                             sx={{
                                 position: "relative",
-                                width: "100%",
-                                maxWidth: 460,
+                                width: { xs: "100%", md: "auto" },
+                                height: { md: "100%" },
+                                maxWidth: { xs: 460, md: "100%" },
+                                maxHeight: { md: "100%" },
                                 mx: "auto",
                                 aspectRatio: "680 / 1050",
                                 borderRadius: "18px",
