@@ -10,6 +10,18 @@ import {
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CloseIcon from "@mui/icons-material/Close";
+import { getToken, removeToken } from "../utils/auth";
+import {
+    deleteAllHeadshots,
+    deleteHeadshot,
+    fetchAccount,
+    fetchLineup,
+    loginAccount,
+    renameHeadshot,
+    saveLineup,
+    signupAccount,
+    uploadHeadshots,
+} from "../utils/lineupApi";
 
 const STORAGE_KEY = "fp-lineup-builder-v1";
 const MAX_PLAYERS = 30;
@@ -122,6 +134,17 @@ const FORMATIONS = {
     ],
 };
 
+function dataUrlToBlob(dataUrl) {
+    if (!dataUrl || !dataUrl.startsWith("data:")) return null;
+    const parts = dataUrl.split(",");
+    if (parts.length < 2) return null;
+    const mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/jpeg";
+    const binary = atob(parts[1]);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+}
+
 function loadState() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -170,7 +193,10 @@ function fileToHeadshot(file) {
             const sy = (img.height - sh) / 2;
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
             URL.revokeObjectURL(url);
-            resolve(canvas.toDataURL("image/jpeg", 0.82));
+            canvas.toBlob((blob) => {
+                if (!blob) reject(new Error("unreadable"));
+                else resolve(blob);
+            }, "image/jpeg", 0.82);
         };
         img.onerror = () => {
             URL.revokeObjectURL(url);
@@ -237,12 +263,129 @@ function PitchMarkings() {
     );
 }
 
+function LineupAuth({ onAuthenticated }) {
+    const [mode, setMode] = useState("login");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [error, setError] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+
+    const submit = async (event) => {
+        event.preventDefault();
+        setSubmitting(true);
+        setError("");
+        try {
+            const user = mode === "signup"
+                ? await signupAccount(email.trim(), password, confirmPassword)
+                : await loginAccount(email.trim(), password);
+            onAuthenticated(user);
+        } catch (err) {
+            setError(err.message || "Something went wrong.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <Box
+            component="form"
+            onSubmit={submit}
+            sx={{
+                maxWidth: 420,
+                mx: "auto",
+                mt: 4,
+                bgcolor: "#fff",
+                borderRadius: "20px",
+                border: "1px solid rgba(0,0,0,0.06)",
+                boxShadow: "0 10px 30px rgba(20,40,28,0.06)",
+                p: 3,
+            }}
+        >
+            <Typography sx={{ fontWeight: 800, fontSize: "1.25rem", color: "#14281c", mb: 0.5 }}>
+                {mode === "signup" ? "Create your account" : "Log in"}
+            </Typography>
+            <Typography sx={{ color: "text.secondary", mb: 2 }}>
+                Your headshots and lineup are saved to your account.
+            </Typography>
+            {error && (
+                <Typography sx={{ mb: 1.5, color: "#9a3412", fontWeight: 600, fontSize: "0.9rem" }}>
+                    {error}
+                </Typography>
+            )}
+            <TextField
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                fullWidth
+                size="small"
+                sx={{ mb: 1.5, bgcolor: "#fff" }}
+            />
+            <TextField
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                fullWidth
+                size="small"
+                sx={{ mb: 1.5 }}
+            />
+            {mode === "signup" && (
+                <TextField
+                    label="Confirm password"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    required
+                    fullWidth
+                    size="small"
+                    sx={{ mb: 1.5 }}
+                />
+            )}
+            <Button
+                type="submit"
+                fullWidth
+                variant="contained"
+                disabled={submitting}
+                sx={{
+                    mt: 0.5,
+                    bgcolor: "#ff6c26",
+                    color: "#111",
+                    fontWeight: 800,
+                    textTransform: "none",
+                    borderRadius: 99,
+                    boxShadow: "none",
+                    "&:hover": { bgcolor: "#e55a1a", boxShadow: "none" },
+                }}
+            >
+                {submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
+            </Button>
+            <Button
+                type="button"
+                fullWidth
+                onClick={() => {
+                    setMode((current) => (current === "login" ? "signup" : "login"));
+                    setError("");
+                }}
+                sx={{ mt: 1, textTransform: "none", fontWeight: 700, color: "#1a472a" }}
+            >
+                {mode === "signup" ? "Already have an account? Log in" : "Need an account? Sign up"}
+            </Button>
+        </Box>
+    );
+}
+
 function LineupPitch() {
-    const saved = useRef(undefined);
-    if (saved.current === undefined) saved.current = loadState();
-    const [players, setPlayers] = useState(saved.current?.players || []);
-    const [assignments, setAssignments] = useState(saved.current?.assignments || {});
-    const [formation, setFormation] = useState(saved.current?.formation || "4-3-3");
+    const [sessionKey, setSessionKey] = useState(0);
+    const [account, setAccount] = useState(null);
+    const [authStatus, setAuthStatus] = useState("loading");
+    const [players, setPlayers] = useState([]);
+    const [assignments, setAssignments] = useState({});
+    const [formation, setFormation] = useState("4-3-3");
+    const [hydrated, setHydrated] = useState(false);
     const [selectedId, setSelectedId] = useState(null);
     const [drag, setDrag] = useState(null);
     const [notice, setNotice] = useState("");
@@ -253,6 +396,8 @@ function LineupPitch() {
     const pointRef = useRef({ x: 0, y: 0 });
     const suppressClick = useRef(false);
     const removeAllTimer = useRef(null);
+    const renameTimers = useRef({});
+    const skipSave = useRef(true);
 
     const slots = FORMATIONS[formation];
 
@@ -265,18 +410,86 @@ function LineupPitch() {
     }, []);
 
     useEffect(() => {
-        try {
-            localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify({ players, assignments, formation })
-            );
-            setNotice((current) =>
-                current.startsWith("Couldn't save") ? "" : current
-            );
-        } catch (err) {
-            setNotice("Couldn't save this lineup in the browser. Try fewer or smaller photos.");
+        let cancelled = false;
+        const load = async () => {
+            if (!getToken()) {
+                setAuthStatus("anonymous");
+                return;
+            }
+            try {
+                const user = await fetchAccount();
+                if (cancelled) return;
+                if (!user) {
+                    removeToken();
+                    setAuthStatus("anonymous");
+                    return;
+                }
+                let lineup = await fetchLineup();
+                if ((lineup.players || []).length === 0) {
+                    const local = loadState();
+                    if (local?.players?.length) {
+                    const files = [];
+                    local.players.forEach((player) => {
+                        const blob = dataUrlToBlob(player.image);
+                        if (blob) {
+                            files.push({
+                                blob,
+                                filename: "headshot.jpg",
+                                name: player.name || "Player",
+                            });
+                        }
+                    });
+                    if (files.length && files.length === local.players.length) {
+                            lineup = await uploadHeadshots(files);
+                            const idMap = {};
+                            local.players.forEach((player, index) => {
+                                if (lineup.players[index]) idMap[player.id] = lineup.players[index].id;
+                            });
+                            const moved = {};
+                            Object.entries(local.assignments || {}).forEach(([slot, playerId]) => {
+                                if (idMap[playerId]) moved[slot] = idMap[playerId];
+                            });
+                            if (Object.keys(moved).length || (local.formation && local.formation !== "4-3-3")) {
+                                lineup = await saveLineup(local.formation || "4-3-3", moved);
+                            }
+                        }
+                        localStorage.removeItem(STORAGE_KEY);
+                    }
+                }
+                if (cancelled) return;
+                skipSave.current = true;
+                setAccount(user);
+                setPlayers(lineup.players);
+                setAssignments(lineup.assignments);
+                setFormation(lineup.formation);
+                setHydrated(true);
+                setAuthStatus("ready");
+            } catch (err) {
+                if (!cancelled) {
+                    setNotice(err.message || "Couldn't load your lineup.");
+                    setAuthStatus("anonymous");
+                }
+            }
+        };
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [sessionKey]);
+
+    useEffect(() => {
+        if (!hydrated) return undefined;
+        if (skipSave.current) {
+            skipSave.current = false;
+            return undefined;
         }
-    }, [players, assignments, formation]);
+        const handle = setTimeout(() => {
+            saveLineup(formation, assignments).catch((err) => {
+                setNotice(err.message || "Couldn't save your lineup.");
+            });
+        }, 300);
+        return () => clearTimeout(handle);
+    }, [formation, assignments, hydrated]);
 
     useEffect(() => {
         return () => {
@@ -404,6 +617,13 @@ function LineupPitch() {
         setSelectedId(null);
     };
 
+    const applyLineup = (lineup) => {
+        skipSave.current = true;
+        setPlayers(lineup.players);
+        setAssignments(lineup.assignments);
+        setFormation(lineup.formation);
+    };
+
     const addFiles = async (fileList) => {
         const images = Array.from(fileList || []).filter((file) =>
             file.type.startsWith("image/")
@@ -420,31 +640,35 @@ function LineupPitch() {
         const batch = images.slice(0, room);
         setUploading(true);
         setNotice("");
-        const created = [];
+        const files = [];
         let failed = 0;
         for (let i = 0; i < batch.length; i += 1) {
             try {
-                const image = await fileToHeadshot(batch[i]);
-                created.push({
-                    id: `p_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+                const blob = await fileToHeadshot(batch[i]);
+                files.push({
+                    blob,
+                    filename: "headshot.jpg",
                     name: nameFromFile(batch[i]),
-                    image,
                 });
             } catch (err) {
                 failed += 1;
             }
         }
-        if (created.length) {
-            setPlayers((prev) => [...prev, ...created].slice(0, MAX_PLAYERS));
-        }
-        if (failed) {
-            setNotice(
-                failed === 1
-                    ? "One image couldn't be read."
-                    : `${failed} images couldn't be read.`
-            );
-        } else if (images.length > room) {
-            setNotice(`Only ${room} more headshot${room === 1 ? "" : "s"} fit.`);
+        try {
+            if (files.length) {
+                applyLineup(await uploadHeadshots(files));
+            }
+            if (failed) {
+                setNotice(
+                    failed === 1
+                        ? "One image couldn't be read."
+                        : `${failed} images couldn't be read.`
+                );
+            } else if (images.length > room) {
+                setNotice(`Only ${room} more headshot${room === 1 ? "" : "s"} fit.`);
+            }
+        } catch (err) {
+            setNotice(err.message || "Couldn't upload those headshots.");
         }
         setUploading(false);
     };
@@ -455,18 +679,21 @@ function LineupPitch() {
                 player.id === playerId ? { ...player, name } : player
             )
         );
+        clearTimeout(renameTimers.current[playerId]);
+        renameTimers.current[playerId] = setTimeout(() => {
+            renameHeadshot(playerId, name).catch((err) => {
+                setNotice(err.message || "Couldn't rename that player.");
+            });
+        }, 400);
     };
 
-    const removePlayer = (playerId) => {
-        setPlayers((prev) => prev.filter((player) => player.id !== playerId));
-        setAssignments((prev) => {
-            const next = { ...prev };
-            Object.keys(next).forEach((key) => {
-                if (next[key] === playerId) delete next[key];
-            });
-            return next;
-        });
-        setSelectedId((current) => (current === playerId ? null : current));
+    const removePlayer = async (playerId) => {
+        try {
+            applyLineup(await deleteHeadshot(playerId));
+            setSelectedId((current) => (current === playerId ? null : current));
+        } catch (err) {
+            setNotice(err.message || "Couldn't remove that player.");
+        }
     };
 
     const clearPitch = () => {
@@ -474,7 +701,7 @@ function LineupPitch() {
         setSelectedId(null);
     };
 
-    const removeAll = () => {
+    const removeAll = async () => {
         if (!confirmRemoveAll) {
             setConfirmRemoveAll(true);
             removeAllTimer.current = setTimeout(() => setConfirmRemoveAll(false), 3000);
@@ -482,10 +709,24 @@ function LineupPitch() {
         }
         if (removeAllTimer.current) clearTimeout(removeAllTimer.current);
         setConfirmRemoveAll(false);
+        try {
+            applyLineup(await deleteAllHeadshots());
+            setSelectedId(null);
+            setNotice("");
+        } catch (err) {
+            setNotice(err.message || "Couldn't remove the squad.");
+        }
+    };
+
+    const logOut = () => {
+        removeToken();
+        setAccount(null);
+        setAuthStatus("anonymous");
         setPlayers([]);
         setAssignments({});
         setSelectedId(null);
-        setNotice("");
+        setHydrated(false);
+        skipSave.current = true;
     };
 
     const changeFormation = (nextFormation) => {
@@ -543,22 +784,63 @@ function LineupPitch() {
                     >
                         Starting Eleven
                     </Typography>
-                    <Button
-                        component="a"
-                        href="https://playfantasypredictor.com"
-                        sx={{
-                            textTransform: "none",
-                            fontWeight: 700,
-                            color: "#14281c",
-                            borderRadius: 99,
-                            flexShrink: 0,
-                        }}
-                    >
-                        Fantasy Predictor
-                    </Button>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+                        {account?.email && (
+                            <Typography
+                                sx={{
+                                    display: { xs: "none", sm: "block" },
+                                    color: "text.secondary",
+                                    fontSize: "0.85rem",
+                                    fontWeight: 600,
+                                    maxWidth: 220,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {account.email}
+                            </Typography>
+                        )}
+                        {account && (
+                            <Button
+                                onClick={logOut}
+                                sx={{ textTransform: "none", fontWeight: 700, color: "#14281c", borderRadius: 99 }}
+                            >
+                                Log out
+                            </Button>
+                        )}
+                        <Button
+                            component="a"
+                            href="https://playfantasypredictor.com"
+                            sx={{
+                                textTransform: "none",
+                                fontWeight: 700,
+                                color: "#14281c",
+                                borderRadius: 99,
+                                flexShrink: 0,
+                            }}
+                        >
+                            Fantasy Predictor
+                        </Button>
+                    </Box>
                 </Box>
             </Box>
             <Box sx={{ maxWidth: 1120, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 2.5, sm: 4 } }}>
+                {authStatus !== "ready" ? (
+                    authStatus === "loading" ? (
+                        <Typography sx={{ color: "text.secondary" }}>Loading your squad…</Typography>
+                    ) : (
+                        <>
+                            {notice && (
+                                <Typography sx={{ mb: 2, color: "#9a3412", fontWeight: 600 }}>
+                                    {notice}
+                                </Typography>
+                            )}
+                            <LineupAuth onAuthenticated={() => setSessionKey((key) => key + 1)} />
+                        </>
+                    )
+                ) : (
+                <>
                 <Box
                     sx={{
                         display: "flex",
@@ -584,8 +866,7 @@ function LineupPitch() {
                             Build your XI
                         </Typography>
                         <Typography sx={{ mt: 0.75, color: "text.secondary", maxWidth: 460 }}>
-                            Upload headshots, then drag them onto the pitch. Drop a player on
-                            someone else to swap, or drag them back to the squad.
+                            Upload headshots, then drag them onto the pitch. Your squad is saved to this account.
                         </Typography>
                     </Box>
                     <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
@@ -992,6 +1273,8 @@ function LineupPitch() {
                         </Box>
                     </Box>
                 </Box>
+                </>
+                )}
             </Box>
 
             {draggedPlayer && (

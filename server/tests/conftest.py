@@ -18,6 +18,7 @@ import app as flask_app  # noqa: E402, F401 — registers routes on config.app
 
 from models import (  # noqa: E402
     User, League, LeagueMembership, LeagueWeekWinner, Fixture, Game, Prediction,
+    LineupPlayer, UserLineup,
 )
 
 _TEST_TABLES = (
@@ -28,6 +29,8 @@ _TEST_TABLES = (
     Fixture.__table__,
     Game.__table__,
     Prediction.__table__,
+    LineupPlayer.__table__,
+    UserLineup.__table__,
 )
 
 

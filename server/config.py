@@ -80,6 +80,8 @@ else:
 _dev_origins = [
     'http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000',
     'http://127.0.0.1:5173', 'https://localhost:3000', 'https://localhost:5173',
+    'http://startingeleven.localhost:3000', 'https://startingeleven.localhost:3000',
+    'https://startingeleven.playfantasypredictor.com',
 ]
 for o in _dev_origins:
     if o not in origins:
