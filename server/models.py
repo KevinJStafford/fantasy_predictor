@@ -86,6 +86,34 @@ class User(db.Model, SerializerMixin):
     def __repr__(self):
         return f'<User {self.id}: {self.username}>'
 
+
+class LineupPlayer(db.Model):
+    """A headshot that belongs to one Starting Eleven account."""
+    __tablename__ = 'lineup_players'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    name = db.Column(db.String(80), nullable=False, default='')
+    image_bytes = db.Column(db.LargeBinary, nullable=False)
+    content_type = db.Column(db.String, nullable=False, default='image/jpeg')
+    image_token = db.Column(db.String, nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    __table_args__ = (
+        db.Index('ix_lineup_players_user_id', 'user_id'),
+    )
+
+
+class UserLineup(db.Model):
+    """Formation and pitch placements for one Starting Eleven account."""
+    __tablename__ = 'user_lineups'
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    formation = db.Column(db.String, nullable=False, default='4-3-3')
+    assignments = db.Column(db.JSON, nullable=False)
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+
+
 class Prediction(db.Model, SerializerMixin):
     __tablename__ = 'predictions'
 

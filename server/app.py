@@ -4585,6 +4585,15 @@ def dedupe_fixtures_cmd():
 from bracket_routes import register_bracket_routes
 register_bracket_routes(app, get_current_user_id=get_current_user_id)
 
+from lineup_routes import register_lineup_routes
+register_lineup_routes(
+    app,
+    get_current_user_id=get_current_user_id,
+    get_active_user_by_id=get_active_user_by_id,
+    get_active_user_by_email=get_active_user_by_email,
+    generate_token=generate_token,
+)
+
 
 def _bootstrap_bracket_editions_on_startup():
     if app.config.get('TESTING'):
