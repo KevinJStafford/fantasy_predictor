@@ -51,7 +51,10 @@ const POSITION_NAMES = {
     ST: "Striker",
     LST: "Left striker",
     RST: "Right striker",
+    MGR: "Manager",
 };
+
+const MANAGER_SLOT = { id: "mgr", label: "MGR", x: 14, y: 93 };
 
 const FORMATIONS = {
     "4-3-3": [
@@ -156,6 +159,7 @@ function loadState() {
             .filter((player) => player && player.id && player.image)
             .slice(0, MAX_PLAYERS);
         const validSlots = new Set(FORMATIONS[formation].map((slot) => slot.id));
+        validSlots.add(MANAGER_SLOT.id);
         const knownIds = new Set(players.map((player) => player.id));
         const assignments = {};
         if (data.assignments && typeof data.assignments === "object") {
@@ -399,7 +403,7 @@ function LineupPitch() {
     const renameTimers = useRef({});
     const skipSave = useRef(true);
 
-    const slots = FORMATIONS[formation];
+    const slots = [...FORMATIONS[formation], MANAGER_SLOT];
 
     useEffect(() => {
         const previousTitle = document.title;
@@ -732,6 +736,7 @@ function LineupPitch() {
     const changeFormation = (nextFormation) => {
         setFormation(nextFormation);
         const valid = new Set(FORMATIONS[nextFormation].map((slot) => slot.id));
+        valid.add(MANAGER_SLOT.id);
         setAssignments((prev) => {
             const next = {};
             Object.entries(prev).forEach(([slot, playerId]) => {
